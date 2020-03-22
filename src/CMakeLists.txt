@@ -1,0 +1,34 @@
+add_executable(batify main.c)
+add_library(battery battery.c)
+
+set_target_properties(batify battery PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED YES
+    C_EXTENSIONS OFF
+)
+
+find_package(PkgConfig REQUIRED)
+pkg_search_module(GLIB REQUIRED glib-2.0)
+pkg_search_module(LIBNOTIFY REQUIRED libnotify)
+pkg_search_module(GDKPIXBUF REQUIRED gdk-pixbuf-2.0)
+
+target_link_libraries(batify 
+    battery 
+    ${GLIB_LDFLAGS}
+    ${LIBNOTIFY_LIBRARIES}
+)
+
+target_include_directories(
+    batify
+    PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${GLIB_INCLUDE_DIRS}
+    ${LIBNOTIFY_INCLUDE_DIRS}
+)
+
+target_include_directories(
+    battery
+    PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${GLIB_INCLUDE_DIRS}
+)
