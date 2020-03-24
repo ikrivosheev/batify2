@@ -49,7 +49,7 @@ gboolean get_battery_status(const gchar* sys_path, BATTERY_STATUS* status)
     gboolean result;
     gchar* sys_status;
 
-    result = _get_sysattr_string(sys_path, "status", &sys_status);
+    result = _get_sysattr_string(sys_path, BATTERY_STATUS_FILENAME, &sys_status);
     
     if (result == TRUE)
     {
@@ -74,15 +74,15 @@ gboolean get_battery_capacity(const gchar* sys_path, guint64* capacity)
     gboolean result;
     guint64 now, full;
 
-    result = _get_sysattr_int(sys_path, "capacity", capacity);
+    result = _get_sysattr_int(sys_path, BATTERY_CAPACITY_FILENAME, capacity);
     if (result == TRUE)
         return TRUE;
 
-    result = _get_sysattr_int(sys_path, "charge_now", &now);
+    result = _get_sysattr_int(sys_path, BATTERY_CHARGE_NOW_FILENAME, &now);
     if (result == FALSE)
         return FALSE;
 
-    result = _get_sysattr_int(sys_path, "charge_full", &full);
+    result = _get_sysattr_int(sys_path, BATTERY_CHARGE_FULL_FILENAME, &full);
     if (result == FALSE)
         return FALSE;
     
@@ -95,15 +95,15 @@ gboolean get_battery_time(const gchar* sys_path, gboolean remaining, guint64* se
     gboolean result;
     guint64 charge_now, charge_full, current_now;
     
-    result = _get_sysattr_int(sys_path, "charge_now", &charge_now);
+    result = _get_sysattr_int(sys_path, BATTERY_CHARGE_NOW_FILENAME, &charge_now);
     if (result == FALSE)
         return FALSE;
     
-    result = _get_sysattr_int(sys_path, "charge_full", &charge_full);
+    result = _get_sysattr_int(sys_path, BATTERY_CHARGE_FULL_FILENAME, &charge_full);
     if (result == FALSE)
         return FALSE;
 
-    result = _get_sysattr_int(sys_path, "current_now", &current_now);
+    result = _get_sysattr_int(sys_path, BATTERY_CURRENT_NOW_FILENAME, &current_now);
 
     if (result == FALSE)
         return FALSE;

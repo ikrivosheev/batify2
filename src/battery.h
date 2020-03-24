@@ -1,6 +1,12 @@
 #ifndef BATTERY_H
 #define BATTERY_H
 
+#define BATTERY_STATUS_FILENAME "status"
+#define BATTERY_CAPACITY_FILENAME "capacity"
+#define BATTERY_CHARGE_NOW_FILENAME "charge_now"
+#define BATTERY_CHARGE_FULL_FILENAME "charge_full"
+#define BATTERY_CURRENT_NOW_FILENAME "current_now"
+
 typedef enum 
 {
     UNKNOWN_STATUS, 

@@ -2,7 +2,9 @@
 #include <libnotify/notify.h>
 #include <stdio.h>
 #include <locale.h>
+#include <signal.h>
 #include <libintl.h>
+#include <sys/inotify.h>
 
 #include "battery.h"
 
@@ -12,6 +14,26 @@
 #define DEFAULT_CRITICAL_LEVEL 10
 #define SYSFS_BASE_PATH "/sys/class/power_supply/"
 #define LOG_ERROR(string, ...) g_printerr(PROGRAM_NAME ": " #string "\n", ##__VA_ARGS__)
+#define EXIT_ON_FALSE(condition, exit_code) \
+{ \
+    if (condition == FALSE) \
+        return 1; \
+}
+#define EXIT_ON_FALSE_MESSAGE(condition, exit_code, error_message, ...) \
+{ \
+    if (condition == FALSE) \
+    { \
+        LOG_ERROR(error_message, ##__VA_ARGS__); \
+        return exit_code; \
+    } \
+}
+#define GOTO_ON_FALSE(condition, label) \
+{ \
+    if (condition == FALSE) \
+    { \
+        goto label; \
+    } \
+}
 
 
 typedef enum 
@@ -33,6 +55,8 @@ static struct config
     DEFAULT_CRITICAL_LEVEL,
 };
 
+static gboolean shutdown = FALSE;
+
 
 static GOptionEntry option_entries[] =
 {
@@ -43,6 +67,10 @@ static GOptionEntry option_entries[] =
     {NULL}
 };
 
+static void signal_handler(int signum)
+{
+    shutdown = TRUE;
+}
 
 static void notify_message(
     NotifyNotification** notification, 
@@ -189,6 +217,7 @@ static gboolean options_init(int argc, char* argv[])
     GOptionContext* option_context;
     option_context = g_option_context_new("[BATTERY ID]");
     g_option_context_add_main_entries(option_context, option_entries, PROGRAM_NAME);
+
     if (g_option_context_parse(option_context, &argc, &argv, &error) == FALSE) 
     {
         LOG_ERROR("Cannot parse command line arguments: %s", error->message);
@@ -222,10 +251,33 @@ static gboolean options_init(int argc, char* argv[])
     return TRUE;
 }
 
+static gboolean open_inotify_fd(
+    const gchar* sysfs_battery_path, 
+    int* inotify_fd, 
+    int* inotify_wd)
+{
+    *inotify_fd = inotify_init();
+    if (*inotify_fd == -1)
+    {
+        LOG_ERROR("Cannot init inotify");
+        return FALSE;
+    }
+    *inotify_wd = inotify_add_watch(*inotify_fd, sysfs_battery_path, IN_MODIFY);
+    if (*inotify_wd == -1)
+    {
+        close(*inotify_fd);
+        LOG_ERROR("Cannot add path to inotify");
+        return FALSE;
+    }
+    return TRUE;
+}
+
 int main(int argc, char* argv[]) 
 {
-    gchar* sysfs_battery_path;
     int return_code = 0;
+    int inotify_fd, inotify_wd, inotify_read;
+    char inotify_buffer;
+    gchar* sysfs_battery_path;
     guint64 seconds, percentage;
     NotifyNotification* notification;
     BATTERY_STATUS prev_status, next_status; 
@@ -233,39 +285,35 @@ int main(int argc, char* argv[])
     gboolean battery_level_critical = FALSE;
     
     setlocale (LC_ALL, "");
-    if (options_init(argc, argv) == FALSE)
-    {
-        LOG_ERROR("Cannot init options");
-        return 1;
-    }
-
-    if (notify_init(PROGRAM_NAME) == FALSE)
-    {
-        LOG_ERROR("Cannot init libnotify");
-        return 1;
-    }
-
+    EXIT_ON_FALSE(options_init(argc, argv), 1);
     sysfs_battery_path = g_strjoin("", SYSFS_BASE_PATH, "BAT", argv[1], NULL);
+    
+    EXIT_ON_FALSE_MESSAGE(notify_init(PROGRAM_NAME), 1, "Cannot init libnotify");
 
-    while (1) 
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+    
+    GOTO_ON_FALSE(open_inotify_fd(sysfs_battery_path, &inotify_fd, &inotify_wd), finish);
+
+    while (shutdown == FALSE) 
     {
         if (get_battery_status(sysfs_battery_path, &next_status) == FALSE)
         {
             LOG_ERROR("Cannot get battery status");
             return_code = 1;
-            goto finish;
+            goto finish_inotify;
         }
         if (get_battery_capacity(sysfs_battery_path, &percentage) == FALSE)
         {
             LOG_ERROR("Cannot get battery capacity");
             return_code = 1;
-            goto finish;
+            goto finish_inotify;
         }
         if (get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds) == FALSE)
         {
             LOG_ERROR("Cannot get battery time");
             return_code = 1;
-            goto finish;
+            goto finish_inotify;
         }
         switch(next_status)
         {
@@ -315,8 +363,10 @@ int main(int argc, char* argv[])
         g_usleep(config.interval * G_USEC_PER_SEC);
     }
 
+finish_inotify:
+    inotify_rm_watch(inotify_fd, inotify_wd);
+    close(inotify_fd);
 finish:
-
     notify_uninit();
     g_free(sysfs_battery_path);
     return return_code;
