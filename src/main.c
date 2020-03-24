@@ -266,7 +266,7 @@ static gboolean open_inotify_fd(
     if (*inotify_wd == -1)
     {
         close(*inotify_fd);
-        LOG_ERROR("Cannot add path to inotify");
+        LOG_ERROR("Cannot add watch to inotify by path: %s", sysfs_battery_path);
         return FALSE;
     }
     return TRUE;
