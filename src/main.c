@@ -4,7 +4,6 @@
 #include <locale.h>
 #include <signal.h>
 #include <libintl.h>
-#include <sys/inotify.h>
 
 #include "battery.h"
 
@@ -222,7 +221,6 @@ static gboolean options_init(int argc, char* argv[])
     {
         LOG_ERROR("Cannot parse command line arguments: %s", error->message);
         g_error_free(error); 
-        error = NULL;
         return FALSE;
     }
     g_option_context_free(option_context);
@@ -251,32 +249,9 @@ static gboolean options_init(int argc, char* argv[])
     return TRUE;
 }
 
-static gboolean open_inotify_fd(
-    const gchar* sysfs_battery_path, 
-    int* inotify_fd, 
-    int* inotify_wd)
-{
-    *inotify_fd = inotify_init();
-    if (*inotify_fd == -1)
-    {
-        LOG_ERROR("Cannot init inotify");
-        return FALSE;
-    }
-    *inotify_wd = inotify_add_watch(*inotify_fd, sysfs_battery_path, IN_MODIFY);
-    if (*inotify_wd == -1)
-    {
-        close(*inotify_fd);
-        LOG_ERROR("Cannot add watch to inotify by path: %s", sysfs_battery_path);
-        return FALSE;
-    }
-    return TRUE;
-}
-
 int main(int argc, char* argv[]) 
 {
     int return_code = 0;
-    int inotify_fd, inotify_wd, inotify_read;
-    char inotify_buffer;
     gchar* sysfs_battery_path;
     guint64 seconds, percentage;
     NotifyNotification* notification;
@@ -293,27 +268,25 @@ int main(int argc, char* argv[])
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     
-    GOTO_ON_FALSE(open_inotify_fd(sysfs_battery_path, &inotify_fd, &inotify_wd), finish);
-
     while (shutdown == FALSE) 
     {
         if (get_battery_status(sysfs_battery_path, &next_status) == FALSE)
         {
             LOG_ERROR("Cannot get battery status");
             return_code = 1;
-            goto finish_inotify;
+            goto finish;
         }
         if (get_battery_capacity(sysfs_battery_path, &percentage) == FALSE)
         {
             LOG_ERROR("Cannot get battery capacity");
             return_code = 1;
-            goto finish_inotify;
+            goto finish;
         }
         if (get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds) == FALSE)
         {
             LOG_ERROR("Cannot get battery time");
             return_code = 1;
-            goto finish_inotify;
+            goto finish;
         }
         switch(next_status)
         {
@@ -363,9 +336,6 @@ int main(int argc, char* argv[])
         g_usleep(config.interval * G_USEC_PER_SEC);
     }
 
-finish_inotify:
-    inotify_rm_watch(inotify_fd, inotify_wd);
-    close(inotify_fd);
 finish:
     notify_uninit();
     g_free(sysfs_battery_path);
