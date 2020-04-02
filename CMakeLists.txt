@@ -4,3 +4,8 @@ project(batify VERSION 0.0.1)
 
 add_subdirectory(src)
 
+install(
+    TARGETS ${PROJECT_NAME}
+    CONFIGURATIONS Release
+    DESTINATION bin
+)

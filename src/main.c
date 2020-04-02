@@ -11,6 +11,7 @@
 #define DEFAULT_INTERVAL 5
 #define DEFAULT_LOW_LEVEL 20
 #define DEFAULT_CRITICAL_LEVEL 10
+#define DEFAULT_FULL_CAPACITY 98
 #define SYSFS_BASE_PATH "/sys/class/power_supply/"
 #define LOG_ERROR(string, ...) g_printerr(PROGRAM_NAME ": " #string "\n", ##__VA_ARGS__)
 #define EXIT_ON_FALSE(condition, exit_code) \
@@ -18,18 +19,19 @@
     if (condition == FALSE) \
         return 1; \
 }
-#define EXIT_ON_FALSE_MESSAGE(condition, exit_code, error_message, ...) \
+#define LOG_AND_EXIT_ON_FALSE(condition, exit_code, log_message, ...) \
 { \
     if (condition == FALSE) \
     { \
-        LOG_ERROR(error_message, ##__VA_ARGS__); \
+        LOG_ERROR(log_message, ##__VA_ARGS__); \
         return exit_code; \
     } \
 }
-#define GOTO_ON_FALSE(condition, label) \
+#define LOG_AND_GOTO_ON_FALSE(condition, label, log_message, ...) \
 { \
     if (condition == FALSE) \
     { \
+        LOG_ERROR(log_message, ##__VA_ARGS__); \
         goto label; \
     } \
 }
@@ -47,11 +49,13 @@ static struct config
     gint timeout;
     gint low_level;
     gint critical_level;
+    gint full_capacity;
 } config = {
     DEFAULT_INTERVAL,
     NOTIFY_EXPIRES_DEFAULT,
     DEFAULT_LOW_LEVEL,
     DEFAULT_CRITICAL_LEVEL,
+    DEFAULT_FULL_CAPACITY
 };
 
 static gboolean shutdown = FALSE;
@@ -63,6 +67,7 @@ static GOptionEntry option_entries[] =
     {"timeout", 't', 0, G_OPTION_ARG_INT, &config.timeout, "Notification timeout", NULL},
     {"low-level", 'l', 0, G_OPTION_ARG_INT, &config.low_level, "Low battery level in percent", NULL},
     {"critical-level", 'c', 0, G_OPTION_ARG_INT, &config.critical_level, "Critical battery level in percent", NULL},
+    {"full-capacity", 'f', 0, G_OPTION_ARG_INT, &config, "Full capacity for battery", NULL},
     {NULL}
 };
 
@@ -131,6 +136,12 @@ static gchar* get_battery_level_summery_string(BATTERY_LEVEL level)
 static gchar* get_battery_body_string(guint64 percentage, guint64 seconds)
 {
     static gchar body_string[255];
+    if (seconds == 0)
+    {
+        g_sprintf(body_string, "%d%% of 100%%", percentage);
+        return body_string;
+    }
+
     guint hours, minutes;
     minutes = seconds / 60;
     hours = minutes / 60; 
@@ -237,7 +248,12 @@ static gboolean options_init(int argc, char* argv[])
     }
     if (config.critical_level < 0 || config.critical_level > 100)
     {   
-        LOG_ERROR("Invalid critical level!, Critical level should be greater then 0, less then 100");
+        LOG_ERROR("Invalid critical level! Critical level should be greater then 0, less then 100");
+        return FALSE;
+    }
+    if (config.full_capacity < 0 || config.full_capacity > 100)
+    {
+        LOG_ERROR("Invalid full capacity! Full capacity should be greater then 0, less then 100");
         return FALSE;
     }
 
@@ -246,6 +262,12 @@ static gboolean options_init(int argc, char* argv[])
         LOG_ERROR("Low level should be less then critical level");
         return FALSE;
     }
+    if (config.full_capacity < config.critical_level)
+    {
+        LOG_ERROR("Full capacity should be greater then critical level");
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -263,42 +285,51 @@ int main(int argc, char* argv[])
     EXIT_ON_FALSE(options_init(argc, argv), 1);
     sysfs_battery_path = g_strjoin("", SYSFS_BASE_PATH, "BAT", argv[1], NULL);
     
-    EXIT_ON_FALSE_MESSAGE(notify_init(PROGRAM_NAME), 1, "Cannot init libnotify");
+    LOG_AND_EXIT_ON_FALSE(notify_init(PROGRAM_NAME), 1, "Cannot init libnotify");
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     
     while (shutdown == FALSE) 
     {
-        if (get_battery_status(sysfs_battery_path, &next_status) == FALSE)
-        {
-            LOG_ERROR("Cannot get battery status");
-            return_code = 1;
-            goto finish;
-        }
-        if (get_battery_capacity(sysfs_battery_path, &percentage) == FALSE)
-        {
-            LOG_ERROR("Cannot get battery capacity");
-            return_code = 1;
-            goto finish;
-        }
-        if (get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds) == FALSE)
-        {
-            LOG_ERROR("Cannot get battery time");
-            return_code = 1;
-            goto finish;
-        }
+        LOG_AND_GOTO_ON_FALSE(
+            get_battery_status(sysfs_battery_path, &next_status),
+            finish,
+            "Cannot get battery status"
+        );
         switch(next_status)
         {
             case UNKNOWN_STATUS:
                 battery_level_low = FALSE;
                 battery_level_critical = FALSE;
+                
+                if (prev_status == next_status)
+                    break;
+
+                LOG_AND_GOTO_ON_FALSE(
+                    get_battery_capacity(sysfs_battery_path, &percentage),
+                    finish,
+                    "Cannot get battery capacity"
+                );
+                if (percentage >= config.full_capacity)
+                    battery_status_notification(notification, CHARGED_STATUS, percentage, 0);
                 break;
             case CHARGED_STATUS:
                 battery_level_low = FALSE;
                 battery_level_critical = FALSE;
                 if (prev_status == next_status)
                     break;
+                LOG_AND_GOTO_ON_FALSE(
+                    get_battery_capacity(sysfs_battery_path, &percentage),
+                    finish,
+                    "Cannot get battery capacity"
+                );
+                LOG_AND_GOTO_ON_FALSE(
+                    get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds),
+                    finish,
+                    "Cannot get battery capacity"
+                );
+
                 battery_status_notification(notification, next_status, percentage, seconds);
                 break;
             case CHARGING_STATUS:
@@ -306,10 +337,32 @@ int main(int argc, char* argv[])
                 battery_level_critical = FALSE;
                 if (prev_status == next_status)
                     break;
+                LOG_AND_GOTO_ON_FALSE(
+                    get_battery_capacity(sysfs_battery_path, &percentage),
+                    finish,
+                    "Cannot get battery capacity"
+                );
+                LOG_AND_GOTO_ON_FALSE(
+                    get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds),
+                    finish,
+                    "Cannot get battery capacity"
+                );
+
                 battery_status_notification(notification, next_status, percentage, seconds);
                 break;
             case DISCHARGING_STATUS:
             case NOT_CHARGING_STATUS:
+                LOG_AND_GOTO_ON_FALSE(
+                    get_battery_capacity(sysfs_battery_path, &percentage),
+                    finish,
+                    "Cannot get battery capacity"
+                );
+                LOG_AND_GOTO_ON_FALSE(
+                    get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds),
+                    finish,
+                    "Cannot get battery capacity"
+                );
+
                 if (prev_status != next_status)
                 {
                     battery_status_notification(notification, next_status, percentage, seconds);
