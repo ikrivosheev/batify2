@@ -2,7 +2,6 @@
 #include <libnotify/notify.h>
 #include <stdio.h>
 #include <locale.h>
-#include <signal.h>
 #include <libintl.h>
 
 #include "battery.h"
@@ -14,25 +13,12 @@
 #define DEFAULT_FULL_CAPACITY 98
 #define SYSFS_BASE_PATH "/sys/class/power_supply/"
 #define LOG_ERROR(string, ...) g_printerr(PROGRAM_NAME ": " #string "\n", ##__VA_ARGS__)
-#define EXIT_ON_FALSE(condition, exit_code) \
-{ \
-    if (condition == FALSE) \
-        return 1; \
-}
 #define LOG_AND_EXIT_ON_FALSE(condition, exit_code, log_message, ...) \
 { \
     if (condition == FALSE) \
     { \
         LOG_ERROR(log_message, ##__VA_ARGS__); \
         return exit_code; \
-    } \
-}
-#define LOG_AND_GOTO_ON_FALSE(condition, label, log_message, ...) \
-{ \
-    if (condition == FALSE) \
-    { \
-        LOG_ERROR(log_message, ##__VA_ARGS__); \
-        goto label; \
     } \
 }
 
@@ -58,7 +44,15 @@ static struct config
     DEFAULT_FULL_CAPACITY
 };
 
-static gboolean shutdown = FALSE;
+static struct _MainContext 
+{
+    gchar* sysfs_battery_path;
+    BATTERY_STATUS prev_status;
+    gboolean low_level_notified;
+    gboolean critical_level_notified;
+};
+
+typedef struct _MainContext MainContext;
 
 
 static GOptionEntry option_entries[] =
@@ -70,11 +64,6 @@ static GOptionEntry option_entries[] =
     {"full-capacity", 'f', 0, G_OPTION_ARG_INT, &config, "Full capacity for battery", NULL},
     {NULL}
 };
-
-static void signal_handler(int signum)
-{
-    shutdown = TRUE;
-}
 
 static void notify_message(
     NotifyNotification** notification, 
@@ -220,6 +209,108 @@ static inline gboolean battery_remaining(BATTERY_STATUS status)
     return FALSE;
 }
 
+static gboolean battery_handler_check(MainContext* context)
+{
+    guint64 capacity;
+    guint64 seconds;
+    BATTERY_STATUS status;
+    NotifyNotification* notification;
+
+    LOG_AND_EXIT_ON_FALSE(
+        get_battery_status(context->sysfs_battery_path, &status),
+        TRUE,
+        "Cannot get battery status"
+    );
+    switch(status)
+    {
+        case UNKNOWN_STATUS:
+            context->low_level_notified = FALSE;
+            context->critical_level_notified = FALSE;
+            
+            if (context->prev_status == status)
+                break;
+
+            LOG_AND_EXIT_ON_FALSE(
+                get_battery_capacity(context->sysfs_battery_path, &capacity),
+                TRUE,
+                "Cannot get battery capacity"
+            );
+            if (capacity >= config.full_capacity)
+                battery_status_notification(notification, CHARGED_STATUS, capacity, 0);
+            break;
+        case CHARGED_STATUS:
+            context->low_level_notified = FALSE;
+            context->critical_level_notified = FALSE;
+            if (context->prev_status == status)
+                break;
+            LOG_AND_EXIT_ON_FALSE(
+                get_battery_capacity(context->sysfs_battery_path, &capacity),
+                TRUE,
+                "Cannot get battery capacity"
+            );
+            LOG_AND_EXIT_ON_FALSE(
+                get_battery_time(context->sysfs_battery_path, battery_remaining(status), &seconds),
+                TRUE,
+                "Cannot get battery time"
+            );
+
+            battery_status_notification(notification, status, capacity, seconds);
+            break;
+        case CHARGING_STATUS:
+            context->low_level_notified = FALSE;
+            context->critical_level_notified = FALSE;
+            if (context->prev_status == status)
+                break;
+            LOG_AND_EXIT_ON_FALSE(
+                get_battery_capacity(context->sysfs_battery_path, &capacity),
+                TRUE,
+                "Cannot get battery capacity"
+            );
+            LOG_AND_EXIT_ON_FALSE(
+                get_battery_time(context->sysfs_battery_path, battery_remaining(status), &seconds),
+                TRUE,
+                "Cannot get battery time"
+            );
+
+            battery_status_notification(notification, status, capacity, seconds);
+            break;
+        case DISCHARGING_STATUS:
+        case NOT_CHARGING_STATUS:
+            LOG_AND_EXIT_ON_FALSE(
+                get_battery_capacity(context->sysfs_battery_path, &capacity),
+                TRUE,
+                "Cannot get battery capacity"
+            );
+            LOG_AND_EXIT_ON_FALSE(
+                get_battery_time(context->sysfs_battery_path, battery_remaining(status), &seconds),
+                TRUE,
+                "Cannot get battery time"
+            );
+
+            if (context->prev_status != status)
+            {
+                battery_status_notification(notification, status, capacity, seconds);
+            }
+            if ((context->critical_level_notified == FALSE) 
+                && (capacity <= config.critical_level))
+            {
+                context->low_level_notified = FALSE;
+                context->critical_level_notified = TRUE;
+                battery_level_notification(notification, CRITICAL_LEVEL, capacity, seconds);
+            }
+            if  ((context->low_level_notified == FALSE) 
+                 && (capacity > config.critical_level) 
+                 && (capacity <= config.low_level))
+            {
+                context->low_level_notified = TRUE;
+                context->critical_level_notified = FALSE;
+                battery_level_notification(notification, LOW_LEVEL, capacity, seconds);
+            }
+            break;
+    }
+    context->prev_status = status;
+}
+
 
 static gboolean options_init(int argc, char* argv[])
 {
@@ -273,124 +364,28 @@ static gboolean options_init(int argc, char* argv[])
 
 int main(int argc, char* argv[]) 
 {
-    int return_code = 0;
-    gchar* sysfs_battery_path;
-    guint64 seconds, percentage;
-    NotifyNotification* notification;
-    BATTERY_STATUS prev_status, next_status; 
-    gboolean battery_level_low = FALSE;
-    gboolean battery_level_critical = FALSE;
+    GMainLoop* loop;
+    MainContext main_context;
     
     setlocale (LC_ALL, "");
-    EXIT_ON_FALSE(options_init(argc, argv), 1);
-    sysfs_battery_path = g_strjoin("", SYSFS_BASE_PATH, "BAT", argv[1], NULL);
-    
+    LOG_AND_EXIT_ON_FALSE(options_init(argc, argv), 1, "Cannot init options");
     LOG_AND_EXIT_ON_FALSE(notify_init(PROGRAM_NAME), 1, "Cannot init libnotify");
 
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    main_context.sysfs_battery_path = g_strjoin("", SYSFS_BASE_PATH, "BAT", argv[1], NULL);
+    main_context.low_level_notified = FALSE;
+    main_context.critical_level_notified = FALSE;
     
-    while (shutdown == FALSE) 
-    {
-        LOG_AND_GOTO_ON_FALSE(
-            get_battery_status(sysfs_battery_path, &next_status),
-            finish,
-            "Cannot get battery status"
-        );
-        switch(next_status)
-        {
-            case UNKNOWN_STATUS:
-                battery_level_low = FALSE;
-                battery_level_critical = FALSE;
-                
-                if (prev_status == next_status)
-                    break;
+    loop = g_main_loop_new(NULL, FALSE);
+    g_timeout_add_seconds(
+        config.interval, 
+        (GSourceFunc)battery_handler_check, 
+        (gpointer)&main_context
+    );
 
-                LOG_AND_GOTO_ON_FALSE(
-                    get_battery_capacity(sysfs_battery_path, &percentage),
-                    finish,
-                    "Cannot get battery capacity"
-                );
-                if (percentage >= config.full_capacity)
-                    battery_status_notification(notification, CHARGED_STATUS, percentage, 0);
-                break;
-            case CHARGED_STATUS:
-                battery_level_low = FALSE;
-                battery_level_critical = FALSE;
-                if (prev_status == next_status)
-                    break;
-                LOG_AND_GOTO_ON_FALSE(
-                    get_battery_capacity(sysfs_battery_path, &percentage),
-                    finish,
-                    "Cannot get battery capacity"
-                );
-                LOG_AND_GOTO_ON_FALSE(
-                    get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds),
-                    finish,
-                    "Cannot get battery capacity"
-                );
-
-                battery_status_notification(notification, next_status, percentage, seconds);
-                break;
-            case CHARGING_STATUS:
-                battery_level_low = FALSE;
-                battery_level_critical = FALSE;
-                if (prev_status == next_status)
-                    break;
-                LOG_AND_GOTO_ON_FALSE(
-                    get_battery_capacity(sysfs_battery_path, &percentage),
-                    finish,
-                    "Cannot get battery capacity"
-                );
-                LOG_AND_GOTO_ON_FALSE(
-                    get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds),
-                    finish,
-                    "Cannot get battery capacity"
-                );
-
-                battery_status_notification(notification, next_status, percentage, seconds);
-                break;
-            case DISCHARGING_STATUS:
-            case NOT_CHARGING_STATUS:
-                LOG_AND_GOTO_ON_FALSE(
-                    get_battery_capacity(sysfs_battery_path, &percentage),
-                    finish,
-                    "Cannot get battery capacity"
-                );
-                LOG_AND_GOTO_ON_FALSE(
-                    get_battery_time(sysfs_battery_path, battery_remaining(next_status), &seconds),
-                    finish,
-                    "Cannot get battery capacity"
-                );
-
-                if (prev_status != next_status)
-                {
-                    battery_status_notification(notification, next_status, percentage, seconds);
-                }
-                if ((battery_level_critical == FALSE) 
-                    && (percentage <= config.critical_level))
-                {
-                    battery_level_low = FALSE;
-                    battery_level_critical = TRUE;
-                    battery_level_notification(notification, CRITICAL_LEVEL, percentage, seconds);
-                }
-                if  ((battery_level_low == FALSE) 
-                     && (percentage > config.critical_level) 
-                     && (percentage <= config.low_level))
-                {
-                    battery_level_low = TRUE;
-                    battery_level_critical = FALSE;
-                    battery_level_notification(notification, LOW_LEVEL, percentage, seconds);
-                }
-                break;
-        }
-
-        prev_status = next_status;
-        g_usleep(config.interval * G_USEC_PER_SEC);
-    }
-
-finish:
+    g_main_loop_run(loop);
+    g_main_loop_unref(loop);
     notify_uninit();
-    g_free(sysfs_battery_path);
-    return return_code;
+    g_free(main_context.sysfs_battery_path);
+
+    return 0;
 }
