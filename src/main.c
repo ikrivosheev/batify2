@@ -243,18 +243,7 @@ static gboolean battery_handler_check(MainContext* context)
             context->critical_level_notified = FALSE;
             if (context->prev_status == status)
                 break;
-            LOG_AND_EXIT_ON_FALSE(
-                get_battery_capacity(context->sysfs_battery_path, &capacity),
-                TRUE,
-                "Cannot get battery capacity"
-            );
-            LOG_AND_EXIT_ON_FALSE(
-                get_battery_time(context->sysfs_battery_path, battery_remaining(status), &seconds),
-                TRUE,
-                "Cannot get battery time"
-            );
-
-            battery_status_notification(notification, status, capacity, seconds);
+            battery_status_notification(notification, status, 100, 0);
             break;
         case CHARGING_STATUS:
             context->low_level_notified = FALSE;

@@ -13,7 +13,7 @@ typedef enum
     DISCHARGING_STATUS, 
     NOT_CHARGING_STATUS, 
     CHARGING_STATUS, 
-    CHARGED_STATUS
+    CHARGED_STATUS,
 } BATTERY_STATUS;
 
 gboolean get_battery_status(const gchar* sys_path, BATTERY_STATUS* status);

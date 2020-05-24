@@ -6,6 +6,5 @@ add_subdirectory(src)
 
 install(
     TARGETS ${PROJECT_NAME}
-    CONFIGURATIONS Release
     DESTINATION bin
 )
