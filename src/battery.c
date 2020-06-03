@@ -3,8 +3,17 @@
 
 #include "battery.h"
 
+#define PROPAGATE_ERROR(error, _error) \
+    if (_error != NULL) \
+    { \
+        g_propagate_error(error, _error); \
+    }
+
+G_DEFINE_QUARK(battery-error-quark, battery_error)
+
 const gdouble HOUR = 3600.0;
 const guint64 PERCENTAGE = 100;
+
 
 static gboolean _get_sysattr_string(
     const gchar* path, 
@@ -16,6 +25,8 @@ static gboolean _get_sysattr_string(
     gboolean result;
 
     sys_filename = g_build_filename(path, sys_attr, NULL);
+    g_debug("Get sys-attr: \"%s\" by path: \"%s\"", sys_attr, sys_filename);
+
     result = g_file_get_contents(sys_filename, value, NULL, error);
     g_free(sys_filename);
 
@@ -31,18 +42,24 @@ static gboolean _get_sysattr_int(
     gchar* s_value;
     gboolean result;
 
-    result = _get_sysattr_string(path, sys_attr, &s_value, error);
-    if (result == FALSE)
+    if (_get_sysattr_string(path, sys_attr, &s_value, error) == FALSE)
         return FALSE;
 
     errno = 0;
     gint64 tmp = g_ascii_strtoull(s_value, NULL, 10);
-    g_free(s_value);
     if (errno)
-        return FALSE;
-    *value = tmp;
+    {
+        g_set_error(error, BATTERY_ERROR, errno, "Faild convert sys-attr value: \"%s\" to int", s_value);
+        result = FALSE;
+    }
+    else
+    {
+        *value = tmp;
+        result = TRUE;
+    }
 
-    return TRUE;
+    g_free(s_value);
+    return result;
 }
 
 gboolean get_battery_status(const gchar* sys_path, BATTERY_STATUS* status, GError** error)
@@ -54,7 +71,7 @@ gboolean get_battery_status(const gchar* sys_path, BATTERY_STATUS* status, GErro
     result = _get_sysattr_string(sys_path, BATTERY_STATUS_FILENAME, &sys_status, &_error);
     if (result == FALSE)
     {
-        g_propagate_error(error, _error);
+        PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
     
@@ -88,19 +105,27 @@ gboolean get_battery_capacity(const gchar* sys_path, guint64* capacity, GError**
     result = _get_sysattr_int(sys_path, BATTERY_CHARGE_NOW_FILENAME, &now, &_error);
     if (result == FALSE)
     {
-        g_propagate_error(error, _error);
+        PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
 
     result = _get_sysattr_int(sys_path, BATTERY_CHARGE_FULL_FILENAME, &full, &_error);
     if (result == FALSE)
     {
-        g_propagate_error(error, _error);
+        PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
     
-    if (full == 0)
+    if (now < 0)
+    {
+        g_set_error(error, BATTERY_ERROR, BATTERY_CHARGE_NOW_ERROR, "Invalid value for charge-now: \"%d\"", now);
         return FALSE;
+    }
+    if (full <= 0)
+    {
+        g_set_error(error, BATTERY_ERROR, BATTERY_CHARGE_FULL_ERROR, "Invalid value for charge-full: \"%d\"", full);
+        return FALSE;
+    }
 
     *capacity = (guint64)(((float)now / full) * PERCENTAGE);
     return TRUE;
@@ -109,32 +134,39 @@ gboolean get_battery_capacity(const gchar* sys_path, guint64* capacity, GError**
 gboolean get_battery_time(const gchar* sys_path, BATTERY_STATUS status, guint64* seconds, GError** error)
 {
     gboolean result;
-    GError* _error;
+    GError* _error = NULL;
     guint64 charge_now, charge_full, current_now;
     
     result = _get_sysattr_int(sys_path, BATTERY_CHARGE_NOW_FILENAME, &charge_now, &_error);
     if (result == FALSE)
     {
-        g_propagate_error(error, _error);
+        PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
     
     result = _get_sysattr_int(sys_path, BATTERY_CHARGE_FULL_FILENAME, &charge_full, &_error);
     if (result == FALSE)
     {
-        g_propagate_error(error, _error);
+        PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
 
     result = _get_sysattr_int(sys_path, BATTERY_CURRENT_NOW_FILENAME, &current_now, &_error);
     if (result == FALSE)
     {
-        g_propagate_error(error, _error);
+        PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
     
     if (current_now <= 0)
+    {
+        g_set_error(
+            error, 
+            BATTERY_ERROR, 
+            BATTERY_CURRENT_NOW_ERROR, 
+            "Invalid value for current-now: \"%d\"", current_now);
         return FALSE;
+    }
 
     switch (status)
     {
@@ -147,6 +179,7 @@ gboolean get_battery_time(const gchar* sys_path, BATTERY_STATUS status, guint64*
             *seconds = (guint64)(HOUR * (charge_full - charge_now) / current_now);
             break;
         default:
+            g_set_error(error, BATTERY_ERROR, BATTERY_INVALID_STATUS, "Invalid status for get_battery_time: \"%d\"", status);
             return FALSE;
     }
     return TRUE;

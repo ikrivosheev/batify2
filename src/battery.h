@@ -7,6 +7,14 @@
 #define BATTERY_CHARGE_FULL_FILENAME "charge_full"
 #define BATTERY_CURRENT_NOW_FILENAME "current_now"
 
+#define BATTERY_ERROR battery_error_quark()
+GQuark       g_io_error_quark      (void);
+
+#define BATTERY_CHARGE_NOW_ERROR 1000
+#define BATTERY_CHARGE_FULL_ERROR 1001
+#define BATTERY_CURRENT_NOW_ERROR 1002
+#define BATTERY_INVALID_STATUS 1003
+
 typedef enum 
 {
     UNKNOWN_STATUS, 

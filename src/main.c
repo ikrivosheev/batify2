@@ -1,4 +1,5 @@
 #include <glib.h>
+#include <glib/gprintf.h>
 #include <libnotify/notify.h>
 #include <stdio.h>
 #include <locale.h>
@@ -11,8 +12,21 @@
 #define DEFAULT_LOW_LEVEL 20
 #define DEFAULT_CRITICAL_LEVEL 10
 #define DEFAULT_FULL_CAPACITY 98
+#define DEFAULT_DEBUG FALSE
 #define SYSFS_BASE_PATH "/sys/class/power_supply/"
-#define LOG_IF
+
+
+#define LOG_WARNING_AND_RETURN(prefix, error, val) \
+    { \
+        if (error != NULL) \
+        { \
+            g_warning(prefix ": %s", error->message); \
+            g_error_free(error); \
+        } \
+        else \
+            g_warning(prefix); \
+        return val; \
+    }
 
 
 typedef enum 
@@ -28,12 +42,14 @@ static struct config
     gint low_level;
     gint critical_level;
     gint full_capacity;
+    gboolean debug;
 } config = {
     DEFAULT_INTERVAL,
     NOTIFY_EXPIRES_DEFAULT,
     DEFAULT_LOW_LEVEL,
     DEFAULT_CRITICAL_LEVEL,
-    DEFAULT_FULL_CAPACITY
+    DEFAULT_FULL_CAPACITY,
+    DEFAULT_DEBUG,
 };
 
 static struct _MainContext 
@@ -42,13 +58,14 @@ static struct _MainContext
     BATTERY_STATUS prev_status;
     gboolean low_level_notified;
     gboolean critical_level_notified;
-};
+} main_context;
 
 typedef struct _MainContext MainContext;
 
 
 static GOptionEntry option_entries[] =
 {
+    {"debug", 'd', 0, G_OPTION_ARG_NONE, &config.debug, "Enable/disable debug information", NULL},
     {"interval", 'i', 0, G_OPTION_ARG_INT, &config.interval, "Update interval in seconds", NULL},
     {"timeout", 't', 0, G_OPTION_ARG_INT, &config.timeout, "Notification timeout", NULL},
     {"low-level", 'l', 0, G_OPTION_ARG_INT, &config.low_level, "Low battery level in percent", NULL},
@@ -152,14 +169,14 @@ static gchar* get_battery_body_string(guint64 percentage, guint64 seconds)
 }
 
 static void battery_status_notification(
-    NotifyNotification* notification, 
+    NotifyNotification** notification, 
     BATTERY_STATUS status,
     guint64 percentage,
     guint64 seconds)
 
 {
     notify_message(
-        &notification, 
+        notification, 
         get_battery_status_summery_string(status),
         get_battery_body_string(percentage, seconds),
         NOTIFY_URGENCY_NORMAL,
@@ -168,7 +185,7 @@ static void battery_status_notification(
 }
 
 static void battery_level_notification(
-    NotifyNotification* notification,
+    NotifyNotification** notification,
     BATTERY_LEVEL level,
     guint64 percentage,
     guint64 seconds)
@@ -185,7 +202,7 @@ static void battery_level_notification(
     }
 
     notify_message(
-        &notification,
+        notification,
         get_battery_level_summery_string(level),
         get_battery_body_string(percentage, seconds),
         urgency,
@@ -200,9 +217,11 @@ static gboolean battery_handler_check(MainContext* context)
     guint64 seconds;
     BATTERY_STATUS status;
     NotifyNotification* notification;
+    GError* error = NULL;
 
     g_debug("Get battery status");
-    g_return_val_if_fail(get_battery_status(context->sysfs_battery_path, &status, NULL), FALSE);
+    if (get_battery_status(context->sysfs_battery_path, &status, &error) == FALSE)
+        LOG_WARNING_AND_RETURN("Cannot get battery status", error, G_SOURCE_CONTINUE);
 
     switch(status)
     {
@@ -215,11 +234,13 @@ static gboolean battery_handler_check(MainContext* context)
                 break;
             
             g_debug("Get battery capacity");
-            g_return_val_if_fail(get_battery_capacity(context->sysfs_battery_path, &capacity, NULL), G_SOURCE_CONTINUE);
+            if (get_battery_capacity(context->sysfs_battery_path, &capacity, &error) == FALSE)
+                LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
+
             if (capacity >= config.full_capacity)
             {
                 g_debug("Capacity is greater then full capacity: %d", config.full_capacity);
-                battery_status_notification(notification, CHARGED_STATUS, capacity, 0);
+                battery_status_notification(&notification, CHARGED_STATUS, capacity, 0);
             }
             break;
         case CHARGED_STATUS:
@@ -227,7 +248,7 @@ static gboolean battery_handler_check(MainContext* context)
             context->low_level_notified = FALSE;
             context->critical_level_notified = FALSE;
             if (context->prev_status != status)
-                battery_status_notification(notification, status, 100, 0);
+                battery_status_notification(&notification, status, 100, 0);
             break;
         case CHARGING_STATUS:
             g_debug("Got CHARGING_STATUS");
@@ -237,12 +258,14 @@ static gboolean battery_handler_check(MainContext* context)
                 break;
             
             g_debug("Get battery capacity");
-            g_return_val_if_fail(get_battery_capacity(context->sysfs_battery_path, &capacity, NULL), G_SOURCE_CONTINUE);
+            if (get_battery_capacity(context->sysfs_battery_path, &capacity, &error) == FALSE)
+                LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
 
             g_debug("Get battery time");
-            g_return_val_if_fail(get_battery_time(context->sysfs_battery_path, status, &seconds, NULL), G_SOURCE_CONTINUE);
+            if (get_battery_time(context->sysfs_battery_path, status, &seconds, &error) == FALSE)
+                LOG_WARNING_AND_RETURN("Cannot get battery time", error, G_SOURCE_CONTINUE);
 
-            battery_status_notification(notification, status, capacity, seconds);
+            battery_status_notification(&notification, status, capacity, seconds);
             break;
         case DISCHARGING_STATUS:
             g_debug("Got DISCHARGING_STATUS");
@@ -250,21 +273,23 @@ static gboolean battery_handler_check(MainContext* context)
             g_debug("Got NOT_CHARGING_STATUS");
 
             g_debug("Get battery capacity");
-            g_return_val_if_fail(get_battery_capacity(context->sysfs_battery_path, &capacity, NULL), G_SOURCE_CONTINUE);
+            if (get_battery_capacity(context->sysfs_battery_path, &capacity, &error) == FALSE)
+                LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
 
             g_debug("Get battery time");
-            g_return_val_if_fail(get_battery_time(context->sysfs_battery_path, status, &seconds, NULL), G_SOURCE_CONTINUE);
+            if (get_battery_time(context->sysfs_battery_path, status, &seconds, &error) == FALSE)
+                LOG_WARNING_AND_RETURN("Cannot get battery time", error, G_SOURCE_CONTINUE);
 
             if (context->prev_status != status)
             {
-                battery_status_notification(notification, status, capacity, seconds);
+                battery_status_notification(&notification, status, capacity, seconds);
             }
             if ((context->critical_level_notified == FALSE) 
                 && (capacity <= config.critical_level))
             {
                 context->low_level_notified = FALSE;
                 context->critical_level_notified = TRUE;
-                battery_level_notification(notification, CRITICAL_LEVEL, capacity, seconds);
+                battery_level_notification(&notification, CRITICAL_LEVEL, capacity, seconds);
             }
             if  ((context->low_level_notified == FALSE) 
                  && (capacity > config.critical_level) 
@@ -272,13 +297,13 @@ static gboolean battery_handler_check(MainContext* context)
             {
                 context->low_level_notified = TRUE;
                 context->critical_level_notified = FALSE;
-                battery_level_notification(notification, LOW_LEVEL, capacity, seconds);
+                battery_level_notification(&notification, LOW_LEVEL, capacity, seconds);
             }
             break;
     }
     context->prev_status = status;
+    return G_SOURCE_CONTINUE;
 }
-
 
 static gboolean options_init(int argc, char* argv[])
 {
@@ -288,13 +313,18 @@ static gboolean options_init(int argc, char* argv[])
     g_option_context_add_main_entries(option_context, option_entries, PROGRAM_NAME);
 
     if (g_option_context_parse(option_context, &argc, &argv, &error) == FALSE) 
-    {
-        g_prefix_error(&error, "Cannot parse command line arguments: ");
-        g_warning(error->message);
-        g_error_free(error); 
-        return FALSE;
-    }
+        LOG_WARNING_AND_RETURN("Cannot parse command line arguments", error, FALSE);
+
     g_option_context_free(option_context);
+
+    if (config.debug == TRUE)
+    {
+        g_log_set_handler(G_LOG_DOMAIN, G_LOG_LEVEL_MASK | G_LOG_LEVEL_DEBUG, g_log_default_handler, NULL);
+    }
+    else
+    {
+        g_log_set_handler(G_LOG_DOMAIN, G_LOG_LEVEL_MASK, g_log_default_handler, NULL);
+    }
 
     if (argc < 2) 
     {
@@ -328,20 +358,20 @@ static gboolean options_init(int argc, char* argv[])
         return FALSE;
     }
     
+    
     return TRUE;
 }
 
 int main(int argc, char* argv[]) 
 {
     GMainLoop* loop;
-    MainContext main_context;
     
     setlocale (LC_ALL, "");
     g_return_val_if_fail(options_init(argc, argv), 1);
-    g_debug("Options have been initialized");
+    g_info("Options have been initialized");
 
     g_return_val_if_fail(notify_init(PROGRAM_NAME), 1);
-    g_debug("Notify have been initialized");
+    g_info("Notify have been initialized");
 
     main_context.sysfs_battery_path = g_strjoin("", SYSFS_BASE_PATH, "BAT", argv[1], NULL);
     main_context.low_level_notified = FALSE;
