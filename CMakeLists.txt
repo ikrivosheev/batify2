@@ -8,3 +8,7 @@ install(
     TARGETS ${PROJECT_NAME}
     DESTINATION bin
 )
+install(    
+    FILES "man/batify.1"
+    DESTINATION share/man/man1
+)

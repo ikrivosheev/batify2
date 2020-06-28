@@ -38,14 +38,12 @@ typedef enum
 static struct config
 {
     gint interval;
-    gint timeout;
     gint low_level;
     gint critical_level;
     gint full_capacity;
     gboolean debug;
 } config = {
     DEFAULT_INTERVAL,
-    NOTIFY_EXPIRES_DEFAULT,
     DEFAULT_LOW_LEVEL,
     DEFAULT_CRITICAL_LEVEL,
     DEFAULT_FULL_CAPACITY,
@@ -67,7 +65,6 @@ static GOptionEntry option_entries[] =
 {
     {"debug", 'd', 0, G_OPTION_ARG_NONE, &config.debug, "Enable/disable debug information", NULL},
     {"interval", 'i', 0, G_OPTION_ARG_INT, &config.interval, "Update interval in seconds", NULL},
-    {"timeout", 't', 0, G_OPTION_ARG_INT, &config.timeout, "Notification timeout", NULL},
     {"low-level", 'l', 0, G_OPTION_ARG_INT, &config.low_level, "Low battery level in percent", NULL},
     {"critical-level", 'c', 0, G_OPTION_ARG_INT, &config.critical_level, "Critical battery level in percent", NULL},
     {"full-capacity", 'f', 0, G_OPTION_ARG_INT, &config, "Full capacity for battery", NULL},
@@ -181,7 +178,7 @@ static void battery_status_notification(
         get_battery_body_string(percentage, seconds),
         NOTIFY_URGENCY_NORMAL,
         NULL,
-        config.timeout);
+        NOTIFY_EXPIRES_DEFAULT);
 }
 
 static void battery_level_notification(
@@ -207,8 +204,7 @@ static void battery_level_notification(
         get_battery_body_string(percentage, seconds),
         urgency,
         NULL, 
-        config.timeout
-    );
+        NOTIFY_EXPIRES_DEFAULT);
 }
 
 static gboolean battery_handler_check(MainContext* context)
