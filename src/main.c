@@ -50,7 +50,7 @@ static struct config
 
 static struct _Context 
 {
-    gchar* sysfs_battery_path;
+    const Battery* battery;
     BATTERY_STATUS prev_status;
     gboolean low_level_notified;
     gboolean critical_level_notified;
@@ -214,7 +214,7 @@ static gboolean battery_handler_check(Context* context)
     GError* error = NULL;
 
     g_debug("Get battery status");
-    if (get_battery_status(context->sysfs_battery_path, &status, &error) == FALSE)
+    if (get_battery_status(context->battery, &status, &error) == FALSE)
         LOG_WARNING_AND_RETURN("Cannot get battery status", error, G_SOURCE_CONTINUE);
 
     switch(status)
@@ -228,7 +228,7 @@ static gboolean battery_handler_check(Context* context)
                 break;
             
             g_debug("Get battery capacity");
-            if (get_battery_capacity(context->sysfs_battery_path, &capacity, &error) == FALSE)
+            if (get_battery_capacity(context->battery, &capacity, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
 
             if (capacity >= config.full_capacity)
@@ -252,11 +252,11 @@ static gboolean battery_handler_check(Context* context)
                 break;
             
             g_debug("Get battery capacity");
-            if (get_battery_capacity(context->sysfs_battery_path, &capacity, &error) == FALSE)
+            if (get_battery_capacity(context->battery, &capacity, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
 
             g_debug("Get battery time");
-            if (get_battery_time(context->sysfs_battery_path, status, &seconds, &error) == FALSE)
+            if (get_battery_time(context->battery, status, &seconds, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get battery time", error, G_SOURCE_CONTINUE);
 
             battery_status_notification(&notification, status, capacity, seconds);
@@ -267,11 +267,11 @@ static gboolean battery_handler_check(Context* context)
             g_debug("Got NOT_CHARGING_STATUS");
 
             g_debug("Get battery capacity");
-            if (get_battery_capacity(context->sysfs_battery_path, &capacity, &error) == FALSE)
+            if (get_battery_capacity(context->battery, &capacity, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
 
             g_debug("Get battery time");
-            if (get_battery_time(context->sysfs_battery_path, status, &seconds, &error) == FALSE)
+            if (get_battery_time(context->battery, status, &seconds, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get battery time", error, G_SOURCE_CONTINUE);
 
             if (context->prev_status != status)
@@ -370,7 +370,7 @@ int main(int argc, char* argv[])
     iter = list;
     while (iter != NULL)
     {
-        context.sysfs_battery_path = (gchar*) list->data;
+        context.battery = (Battery*) list->data;
         context.low_level_notified = FALSE;
         context.critical_level_notified = FALSE;
         g_timeout_add_seconds(
@@ -378,7 +378,7 @@ int main(int argc, char* argv[])
             (GSourceFunc) battery_handler_check,
             (gpointer)& context);
         
-        g_info("Add watcher: %s", context.sysfs_battery_path);
+        g_info("Add watcher: %s", context.battery->name);
 
         iter = g_slist_next(iter);
     }

@@ -14,27 +14,37 @@ G_DEFINE_QUARK(battery-error-quark, battery_error)
 const gdouble HOUR = 3600.0;
 const guint64 PERCENTAGE = 100;
 
-
-static gboolean _get_sysattr_string(
-    const gchar* path, 
-    const gchar* sys_attr, 
-    gchar **value,
+static gboolean _get_sysattr_string_by_path(
+    const gchar* battery_name,
+    const gchar* sys_path,
+    const gchar* sys_attr,
+    gchar** value,
     GError** error)
 {
     gchar *sys_filename;
     gboolean result;
 
-    sys_filename = g_build_filename(path, sys_attr, NULL);
-    g_debug("Get sys-attr: \"%s\" by path: \"%s\"", sys_attr, sys_filename);
+    sys_filename = g_build_filename(sys_path, sys_attr, NULL);
+    g_debug("Get attr: \"%s\" for battery: \"%s\"", sys_attr, battery_name);
 
     result = g_file_get_contents(sys_filename, value, NULL, error);
     g_free(sys_filename);
 
     return result;
+
+}
+
+static gboolean _get_sysattr_string(
+    const Battery* battery, 
+    const gchar* sys_attr, 
+    gchar **value,
+    GError** error)
+{
+    return _get_sysattr_string_by_path(battery->name, battery->sys_path, sys_attr, value, error);
 }
 
 static gboolean _get_sysattr_int(
-    const gchar* path,
+    const Battery* battery,
     const gchar* sys_attr,
     guint64 *value,
     GError** error)
@@ -42,7 +52,7 @@ static gboolean _get_sysattr_int(
     gchar* s_value;
     gboolean result;
 
-    if (_get_sysattr_string(path, sys_attr, &s_value, error) == FALSE)
+    if (_get_sysattr_string(battery, sys_attr, &s_value, error) == FALSE)
         return FALSE;
 
     errno = 0;
@@ -62,13 +72,45 @@ static gboolean _get_sysattr_int(
     return result;
 }
 
-gboolean get_battery_status(const gchar* sys_path, BATTERY_STATUS* status, GError** error)
+gboolean battery_init(Battery* battery, gchar* name, GError** error)
+{
+    gboolean result;
+    gchar* model_name, *manufacture, *technology;
+    gchar* sys_path = g_strjoin("", SYSFS_BASE_PATH, name, NULL);
+    
+    result = _get_sysattr_string_by_path(name, sys_path, BATTERY_MANUFACTUR_FILENAME, &manufacture, error);
+    g_return_val_if_fail(result, FALSE);
+
+    result = _get_sysattr_string_by_path(name, sys_path, BATTERY_MODEL_NAME_FILENAME, &model_name, error);
+    g_return_val_if_fail(result, FALSE);
+
+    result = _get_sysattr_string_by_path(name, sys_path, BATTERY_TECHNOLOGY_FILENAME, &technology, error);
+    g_return_val_if_fail(result, FALSE);
+
+    battery->sys_path = sys_path;
+    battery->name = name;
+    battery->model_name = model_name;
+    battery->manufacture = manufacture;
+    battery->technology = technology;
+    return TRUE;
+}
+
+void battery_free(Battery* battery)
+{
+    g_free(battery->name);
+    g_free(battery->sys_path);
+    g_free(battery->model_name);
+    g_free(battery->manufacture);
+    g_free(battery->technology);
+}
+
+gboolean get_battery_status(const Battery* battery, BATTERY_STATUS* status, GError** error)
 {
     gboolean result;
     GError* _error = NULL;
     gchar* sys_status;
 
-    result = _get_sysattr_string(sys_path, BATTERY_STATUS_FILENAME, &sys_status, &_error);
+    result = _get_sysattr_string(battery, BATTERY_STATUS_FILENAME, &sys_status, &_error);
     if (result == FALSE)
     {
         PROPAGATE_ERROR(error, _error);
@@ -90,26 +132,26 @@ gboolean get_battery_status(const gchar* sys_path, BATTERY_STATUS* status, GErro
     return TRUE;
 }
 
-gboolean get_battery_capacity(const gchar* sys_path, guint64* capacity, GError** error)
+gboolean get_battery_capacity(const Battery* battery, guint64* capacity, GError** error)
 {
     gboolean result;
     GError* _error = NULL;
     guint64 now, full;
 
-    result = _get_sysattr_int(sys_path, BATTERY_CAPACITY_FILENAME, capacity, NULL);
+    result = _get_sysattr_int(battery, BATTERY_CAPACITY_FILENAME, capacity, NULL);
     if (result == TRUE)
     {
         return TRUE;
     }
 
-    result = _get_sysattr_int(sys_path, BATTERY_CHARGE_NOW_FILENAME, &now, &_error);
+    result = _get_sysattr_int(battery, BATTERY_CHARGE_NOW_FILENAME, &now, &_error);
     if (result == FALSE)
     {
         PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
 
-    result = _get_sysattr_int(sys_path, BATTERY_CHARGE_FULL_FILENAME, &full, &_error);
+    result = _get_sysattr_int(battery, BATTERY_CHARGE_FULL_FILENAME, &full, &_error);
     if (result == FALSE)
     {
         PROPAGATE_ERROR(error, _error);
@@ -131,27 +173,27 @@ gboolean get_battery_capacity(const gchar* sys_path, guint64* capacity, GError**
     return TRUE;
 }
 
-gboolean get_battery_time(const gchar* sys_path, BATTERY_STATUS status, guint64* seconds, GError** error)
+gboolean get_battery_time(const Battery* battery, BATTERY_STATUS status, guint64* seconds, GError** error)
 {
     gboolean result;
     GError* _error = NULL;
     guint64 charge_now, charge_full, current_now;
     
-    result = _get_sysattr_int(sys_path, BATTERY_CHARGE_NOW_FILENAME, &charge_now, &_error);
+    result = _get_sysattr_int(battery, BATTERY_CHARGE_NOW_FILENAME, &charge_now, &_error);
     if (result == FALSE)
     {
         PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
     
-    result = _get_sysattr_int(sys_path, BATTERY_CHARGE_FULL_FILENAME, &charge_full, &_error);
+    result = _get_sysattr_int(battery, BATTERY_CHARGE_FULL_FILENAME, &charge_full, &_error);
     if (result == FALSE)
     {
         PROPAGATE_ERROR(error, _error);
         return FALSE;
     }
 
-    result = _get_sysattr_int(sys_path, BATTERY_CURRENT_NOW_FILENAME, &current_now, &_error);
+    result = _get_sysattr_int(battery, BATTERY_CURRENT_NOW_FILENAME, &current_now, &_error);
     if (result == FALSE)
     {
         PROPAGATE_ERROR(error, _error);
@@ -187,7 +229,7 @@ gboolean get_battery_time(const gchar* sys_path, BATTERY_STATUS status, guint64*
 
 gboolean get_batteries_supplies(GSList** list, GError** error)
 {
-    gchar* full_path;
+    Battery* battery;
     const gchar* dir_name;
     GDir* dir = g_dir_open(SYSFS_BASE_PATH, 0, error); 
     if (dir == NULL)
@@ -198,8 +240,12 @@ gboolean get_batteries_supplies(GSList** list, GError** error)
     {
         if (g_str_has_prefix(dir_name, SYSFS_BATTERY_PREFIX))
         {
-            full_path = g_strjoin("", SYSFS_BASE_PATH, dir_name, NULL);
-            (*list) = g_slist_prepend((*list), full_path);
+            battery = g_new(Battery, 1);
+            if (battery_init(battery, g_strdup(dir_name), error) == FALSE)
+            {
+                return FALSE;
+            }
+            (*list) = g_slist_prepend((*list), battery);
         }
 
         dir_name = g_dir_read_name(dir);

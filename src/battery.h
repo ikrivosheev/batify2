@@ -4,6 +4,9 @@
 #define SYSFS_BATTERY_PREFIX "BAT"
 #define SYSFS_BASE_PATH "/sys/class/power_supply/"
 
+#define BATTERY_MANUFACTUR_FILENAME "manufacturer"
+#define BATTERY_MODEL_NAME_FILENAME "model_name"
+#define BATTERY_TECHNOLOGY_FILENAME "technology"
 #define BATTERY_STATUS_FILENAME "status"
 #define BATTERY_CAPACITY_FILENAME "capacity"
 #define BATTERY_CHARGE_NOW_FILENAME "charge_now"
@@ -28,9 +31,20 @@ typedef enum
     CHARGED_STATUS,
 } BATTERY_STATUS;
 
-gboolean get_battery_status(const gchar* sys_path, BATTERY_STATUS* status, GError** error);
-gboolean get_battery_capacity(const gchar* sys_path, guint64* capacity, GError** error);
-gboolean get_battery_time(const gchar* sys_path, BATTERY_STATUS status, guint64* time, GError** error);
+struct _Battery {
+    gchar* name;
+    gchar* sys_path;
+    gchar* model_name;
+    gchar* manufacture;
+    gchar* technology;
+};
+typedef struct _Battery Battery;
+
+gboolean battery_init(Battery* battery, gchar* name, GError** error);
+void battery_free(Battery* battery);
+gboolean get_battery_status(const Battery* battery, BATTERY_STATUS* status, GError** error);
+gboolean get_battery_capacity(const Battery* battery, guint64* capacity, GError** error);
+gboolean get_battery_time(const Battery* battery, BATTERY_STATUS status, guint64* time, GError** error);
 
 gboolean get_batteries_supplies(GSList** list, GError** error);
 
