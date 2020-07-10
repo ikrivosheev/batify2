@@ -350,7 +350,7 @@ static gboolean options_init(int argc, char* argv[])
 
 int main(int argc, char* argv[]) 
 {
-    Context context;
+    Context* context;
     GMainLoop* loop;
     GSList* list = NULL;
     GSList* iter = NULL;
@@ -370,15 +370,16 @@ int main(int argc, char* argv[])
     iter = list;
     while (iter != NULL)
     {
-        context.battery = (Battery*) list->data;
-        context.low_level_notified = FALSE;
-        context.critical_level_notified = FALSE;
+        context = g_new(Context, 1);
+        context->battery = (Battery*) list->data;
+        context->low_level_notified = FALSE;
+        context->critical_level_notified = FALSE;
         g_timeout_add_seconds(
             config.interval,
             (GSourceFunc) battery_handler_check,
             (gpointer)& context);
         
-        g_info("Add watcher: %s", context.battery->name);
+        g_info("Add watcher: %s", context->battery->name);
 
         iter = g_slist_next(iter);
     }
