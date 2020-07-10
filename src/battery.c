@@ -184,3 +184,27 @@ gboolean get_battery_time(const gchar* sys_path, BATTERY_STATUS status, guint64*
     }
     return TRUE;
 }
+
+gboolean get_batteries_supplies(GSList** list, GError** error)
+{
+    gchar* full_path;
+    const gchar* dir_name;
+    GDir* dir = g_dir_open(SYSFS_BASE_PATH, 0, error); 
+    if (dir == NULL)
+        return FALSE;
+    
+    dir_name = g_dir_read_name(dir);
+    while(dir_name != NULL)
+    {
+        if (g_str_has_prefix(dir_name, SYSFS_BATTERY_PREFIX))
+        {
+            full_path = g_strjoin("", SYSFS_BASE_PATH, dir_name, NULL);
+            (*list) = g_slist_prepend((*list), full_path);
+        }
+
+        dir_name = g_dir_read_name(dir);
+    }
+    
+    g_dir_close(dir);
+    return TRUE;
+}

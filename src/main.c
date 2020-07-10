@@ -13,8 +13,6 @@
 #define DEFAULT_CRITICAL_LEVEL 10
 #define DEFAULT_FULL_CAPACITY 98
 #define DEFAULT_DEBUG FALSE
-#define SYSFS_BASE_PATH "/sys/class/power_supply/"
-
 
 #define LOG_WARNING_AND_RETURN(prefix, error, val) \
     { \
@@ -50,15 +48,15 @@ static struct config
     DEFAULT_DEBUG,
 };
 
-static struct _MainContext 
+static struct _Context 
 {
     gchar* sysfs_battery_path;
     BATTERY_STATUS prev_status;
     gboolean low_level_notified;
     gboolean critical_level_notified;
-} main_context;
+};
 
-typedef struct _MainContext MainContext;
+typedef struct _Context Context;
 
 
 static GOptionEntry option_entries[] =
@@ -207,7 +205,7 @@ static void battery_level_notification(
         NOTIFY_EXPIRES_DEFAULT);
 }
 
-static gboolean battery_handler_check(MainContext* context)
+static gboolean battery_handler_check(Context* context)
 {
     guint64 capacity;
     guint64 seconds;
@@ -305,7 +303,8 @@ static gboolean options_init(int argc, char* argv[])
 {
     GError* error = NULL;
     GOptionContext* option_context;
-    option_context = g_option_context_new("[BATTERY ID]");
+
+    option_context = g_option_context_new(NULL);
     g_option_context_add_main_entries(option_context, option_entries, PROGRAM_NAME);
 
     if (g_option_context_parse(option_context, &argc, &argv, &error) == FALSE) 
@@ -314,19 +313,10 @@ static gboolean options_init(int argc, char* argv[])
     g_option_context_free(option_context);
 
     if (config.debug == TRUE)
-    {
         g_log_set_handler(G_LOG_DOMAIN, G_LOG_LEVEL_MASK | G_LOG_LEVEL_DEBUG, g_log_default_handler, NULL);
-    }
     else
-    {
         g_log_set_handler(G_LOG_DOMAIN, G_LOG_LEVEL_MASK, g_log_default_handler, NULL);
-    }
 
-    if (argc < 2) 
-    {
-        g_warning("[BATTERY ID] did'n set");
-        return FALSE;
-    }
     if (config.low_level < 0 || config.low_level > 100)
     {
         g_warning("Invalid low level! Low level should be greater then 0, less then 100");
@@ -360,30 +350,43 @@ static gboolean options_init(int argc, char* argv[])
 
 int main(int argc, char* argv[]) 
 {
+    Context context;
     GMainLoop* loop;
+    GSList* list = NULL;
+    GSList* iter = NULL;
     
     setlocale (LC_ALL, "");
     g_return_val_if_fail(options_init(argc, argv), 1);
     g_info("Options have been initialized");
 
     g_return_val_if_fail(notify_init(PROGRAM_NAME), 1);
-    g_info("Notify have been initialized");
-
-    main_context.sysfs_battery_path = g_strjoin("", SYSFS_BASE_PATH, "BAT", argv[1], NULL);
-    main_context.low_level_notified = FALSE;
-    main_context.critical_level_notified = FALSE;
+    g_info("Notify has been initialized");
     
     loop = g_main_loop_new(NULL, FALSE);
-    g_timeout_add_seconds(
-        config.interval, 
-        (GSourceFunc)battery_handler_check, 
-        (gpointer)&main_context
-    );
-    
+
+    g_return_val_if_fail(get_batteries_supplies(&list, NULL), 1);
+    g_info("Power supply list has been initialized");
+
+    iter = list;
+    while (iter != NULL)
+    {
+        context.sysfs_battery_path = (gchar*) list->data;
+        context.low_level_notified = FALSE;
+        context.critical_level_notified = FALSE;
+        g_timeout_add_seconds(
+            config.interval,
+            (GSourceFunc) battery_handler_check,
+            (gpointer)& context);
+        
+        g_info("Add watcher: %s", context.sysfs_battery_path);
+
+        iter = g_slist_next(iter);
+    }
+
     g_main_loop_run(loop);
     g_main_loop_unref(loop);
     notify_uninit();
-    g_free(main_context.sysfs_battery_path);
+    g_slist_free(list);
     
     return 0;
 }

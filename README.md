@@ -9,7 +9,7 @@ Simple battery notification.
 ### Usage
 
 ```
-batify [OPTION…] [BATTERY ID]
+batify [OPTION…]
 ```
 
 ### Options
@@ -27,8 +27,8 @@ batify [OPTION…] [BATTERY ID]
 
 ### Examples
 
-`batify 1`
+`batify`
 
-`batify -i 10 1`
+`batify -i 10`
 
-`batify -l 25 -c 15 -f 98 1`
+`batify -l 25 -c 15 -f 98`
