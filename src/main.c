@@ -89,25 +89,25 @@ static void notify_message(
 }
 
 
-static gchar* get_battery_status_summery_string(BATTERY_STATUS status)
+static gchar* get_battery_status_summery_string(const Battery* battery, BATTERY_STATUS status)
 {
     static gchar string[255];
     switch(status)
     {
         case UNKNOWN_STATUS:
-            g_strlcpy(string, "Battery is unknown!", 255);
+            g_sprintf(string, "%s (%s) is unknown", battery->name, battery->technology);
             break;
         case CHARGING_STATUS:
-            g_strlcpy(string, "Battery is charging", 255);
+            g_sprintf(string, "%s (%s) is charging", battery->name, battery->technology);
             break;
         case DISCHARGING_STATUS:
-            g_strlcpy(string, "Battery is discharging", 255);
+            g_sprintf(string, "%s (%s) is discharging", battery->name, battery->technology);
             break;
         case NOT_CHARGING_STATUS:
-            g_strlcpy(string, "Battery is not charging", 255);
+            g_sprintf(string, "%s (%s) is not charging", battery->name, battery->technology);
             break;
         case CHARGED_STATUS:
-            g_strlcpy(string, "Battery is charged", 255);
+            g_sprintf(string, "%s (%s) is charged", battery->name, battery->technology);
             break;
         default:
             string[0] = '\0';
@@ -116,22 +116,27 @@ static gchar* get_battery_status_summery_string(BATTERY_STATUS status)
     return string;
 }
 
-static gchar* get_battery_level_summery_string(BATTERY_LEVEL level)
+static gchar* get_battery_level_summery_string(const Battery* battery, BATTERY_LEVEL level)
 {
     static gchar string[255];
     switch(level)
     {
         case LOW_LEVEL:
-            g_strlcpy(string, "Battery level is low!", 255);
+            g_sprintf(string, "%s (%s) level is low", battery->name, battery->technology);
             break;
         case CRITICAL_LEVEL:
-            g_strlcpy(string, "Battery level is critical!", 255);
+            g_sprintf(string, "%s (%s) level is critical", battery->name, battery->technology);
+            break;
+        default:
+            string[0] = '\0';
             break;
     }
     return string;
 }
 
-static gchar* get_battery_body_string(guint64 percentage, guint64 seconds)
+static gchar* get_battery_body_string(
+    const guint64 percentage, 
+    const guint64 seconds)
 {
     static gchar body_string[255];
     if (seconds == 0)
@@ -164,15 +169,16 @@ static gchar* get_battery_body_string(guint64 percentage, guint64 seconds)
 }
 
 static void battery_status_notification(
-    NotifyNotification** notification, 
-    BATTERY_STATUS status,
-    guint64 percentage,
-    guint64 seconds)
+    const Battery* battery,
+    const BATTERY_STATUS status,
+    const guint64 percentage,
+    const guint64 seconds,
+    NotifyNotification** notification)
 
 {
     notify_message(
         notification, 
-        get_battery_status_summery_string(status),
+        get_battery_status_summery_string(battery, status),
         get_battery_body_string(percentage, seconds),
         NOTIFY_URGENCY_NORMAL,
         NULL,
@@ -180,10 +186,11 @@ static void battery_status_notification(
 }
 
 static void battery_level_notification(
-    NotifyNotification** notification,
-    BATTERY_LEVEL level,
-    guint64 percentage,
-    guint64 seconds)
+    const Battery* battery,
+    const BATTERY_LEVEL level,
+    const guint64 percentage,
+    const guint64 seconds,
+    NotifyNotification** notification)
 {
     NotifyUrgency urgency;
     switch(level)
@@ -198,7 +205,7 @@ static void battery_level_notification(
 
     notify_message(
         notification,
-        get_battery_level_summery_string(level),
+        get_battery_level_summery_string(battery, level),
         get_battery_body_string(percentage, seconds),
         urgency,
         NULL, 
@@ -212,9 +219,10 @@ static gboolean battery_handler_check(Context* context)
     BATTERY_STATUS status;
     NotifyNotification* notification;
     GError* error = NULL;
+    const Battery* battery = context->battery;
 
     g_debug("Get battery status");
-    if (get_battery_status(context->battery, &status, &error) == FALSE)
+    if (get_battery_status(battery, &status, &error) == FALSE)
         LOG_WARNING_AND_RETURN("Cannot get battery status", error, G_SOURCE_CONTINUE);
 
     switch(status)
@@ -228,13 +236,13 @@ static gboolean battery_handler_check(Context* context)
                 break;
             
             g_debug("Get battery capacity");
-            if (get_battery_capacity(context->battery, &capacity, &error) == FALSE)
+            if (get_battery_capacity(battery, &capacity, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
 
             if (capacity >= config.full_capacity)
             {
                 g_debug("Capacity is greater then full capacity: %d", config.full_capacity);
-                battery_status_notification(&notification, CHARGED_STATUS, capacity, 0);
+                battery_status_notification(battery, CHARGED_STATUS, capacity, 0, &notification);
             }
             break;
         case CHARGED_STATUS:
@@ -242,7 +250,7 @@ static gboolean battery_handler_check(Context* context)
             context->low_level_notified = FALSE;
             context->critical_level_notified = FALSE;
             if (context->prev_status != status)
-                battery_status_notification(&notification, status, 100, 0);
+                battery_status_notification(battery, status, 100, 0, &notification);
             break;
         case CHARGING_STATUS:
             g_debug("Got CHARGING_STATUS");
@@ -252,14 +260,14 @@ static gboolean battery_handler_check(Context* context)
                 break;
             
             g_debug("Get battery capacity");
-            if (get_battery_capacity(context->battery, &capacity, &error) == FALSE)
+            if (get_battery_capacity(battery, &capacity, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
 
             g_debug("Get battery time");
-            if (get_battery_time(context->battery, status, &seconds, &error) == FALSE)
+            if (get_battery_time(battery, status, &seconds, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get battery time", error, G_SOURCE_CONTINUE);
 
-            battery_status_notification(&notification, status, capacity, seconds);
+            battery_status_notification(battery, status, capacity, seconds, &notification);
             break;
         case DISCHARGING_STATUS:
             g_debug("Got DISCHARGING_STATUS");
@@ -267,23 +275,23 @@ static gboolean battery_handler_check(Context* context)
             g_debug("Got NOT_CHARGING_STATUS");
 
             g_debug("Get battery capacity");
-            if (get_battery_capacity(context->battery, &capacity, &error) == FALSE)
+            if (get_battery_capacity(battery, &capacity, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
 
             g_debug("Get battery time");
-            if (get_battery_time(context->battery, status, &seconds, &error) == FALSE)
+            if (get_battery_time(battery, status, &seconds, &error) == FALSE)
                 LOG_WARNING_AND_RETURN("Cannot get battery time", error, G_SOURCE_CONTINUE);
 
             if (context->prev_status != status)
             {
-                battery_status_notification(&notification, status, capacity, seconds);
+                battery_status_notification(battery, status, capacity, seconds, &notification);
             }
             if ((context->critical_level_notified == FALSE) 
                 && (capacity <= config.critical_level))
             {
                 context->low_level_notified = FALSE;
                 context->critical_level_notified = TRUE;
-                battery_level_notification(&notification, CRITICAL_LEVEL, capacity, seconds);
+                battery_level_notification(battery, CRITICAL_LEVEL, capacity, seconds, &notification);
             }
             if  ((context->low_level_notified == FALSE) 
                  && (capacity > config.critical_level) 
@@ -291,7 +299,7 @@ static gboolean battery_handler_check(Context* context)
             {
                 context->low_level_notified = TRUE;
                 context->critical_level_notified = FALSE;
-                battery_level_notification(&notification, LOW_LEVEL, capacity, seconds);
+                battery_level_notification(battery, LOW_LEVEL, capacity, seconds, &notification);
             }
             break;
     }
@@ -374,10 +382,12 @@ int main(int argc, char* argv[])
         context->battery = (Battery*) list->data;
         context->low_level_notified = FALSE;
         context->critical_level_notified = FALSE;
-        g_timeout_add_seconds(
+        g_timeout_add_seconds_full(
+            G_PRIORITY_DEFAULT,
             config.interval,
             (GSourceFunc) battery_handler_check,
-            (gpointer)& context);
+            (gpointer) context,
+            (GDestroyNotify) g_free);
         
         g_info("Add watcher: %s", context->battery->name);
 
@@ -385,9 +395,10 @@ int main(int argc, char* argv[])
     }
 
     g_main_loop_run(loop);
+
     g_main_loop_unref(loop);
     notify_uninit();
-    g_slist_free(list);
+    g_slist_free_full(list, (GDestroyNotify) battery_free);
     
     return 0;
 }

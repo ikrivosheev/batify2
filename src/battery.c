@@ -89,9 +89,9 @@ gboolean battery_init(Battery* battery, gchar* name, GError** error)
 
     battery->sys_path = sys_path;
     battery->name = name;
-    battery->model_name = model_name;
-    battery->manufacture = manufacture;
-    battery->technology = technology;
+    battery->model_name = g_strstrip(model_name);
+    battery->manufacture = g_strstrip(manufacture);
+    battery->technology = g_strstrip(technology);
     return TRUE;
 }
 
