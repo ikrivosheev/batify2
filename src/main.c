@@ -26,6 +26,7 @@
         return val; \
     }
 
+GMainLoop* loop;
 
 typedef enum 
 {
@@ -50,13 +51,29 @@ static struct config
 
 static struct _Context 
 {
-    const Battery* battery;
+    Battery* battery;
     BATTERY_STATUS prev_status;
     gboolean low_level_notified;
     gboolean critical_level_notified;
 };
 
 typedef struct _Context Context;
+
+
+Context* context_init(Battery* battery)
+{
+    Context* context = g_new(Context, 1);
+    context->battery = battery_copy(battery);
+    context->low_level_notified = FALSE;
+    context->critical_level_notified = FALSE;
+    return context;
+}
+
+void context_free(Context* context)
+{
+    battery_free(context->battery);
+    g_free(context);
+}
 
 
 static GOptionEntry option_entries[] =
@@ -74,22 +91,16 @@ static void notify_message(
     const gchar* summary, 
     const gchar* body,
     NotifyUrgency urgency,
-    GdkPixbuf* pixbuf,
     gint timeout)
 {
     *notification = notify_notification_new(summary, body, NULL);
     notify_notification_set_timeout(*notification, timeout);
     notify_notification_set_urgency(*notification, urgency);
-    if (pixbuf != NULL)
-    {
-        notify_notification_set_image_from_pixbuf(*notification, pixbuf);
-    }
-
     notify_notification_show(*notification, NULL);
 }
 
 
-static gchar* get_battery_status_summery_string(const Battery* battery, BATTERY_STATUS status)
+static gchar* get_battery_status_summery_string(const Battery* battery, const BATTERY_STATUS status)
 {
     static gchar string[255];
     switch(status)
@@ -116,7 +127,7 @@ static gchar* get_battery_status_summery_string(const Battery* battery, BATTERY_
     return string;
 }
 
-static gchar* get_battery_level_summery_string(const Battery* battery, BATTERY_LEVEL level)
+static gchar* get_battery_level_summery_string(const Battery* battery, const BATTERY_LEVEL level)
 {
     static gchar string[255];
     switch(level)
@@ -173,7 +184,7 @@ static void battery_status_notification(
     const BATTERY_STATUS status,
     const guint64 percentage,
     const guint64 seconds,
-    NotifyNotification** notification)
+    NotifyNotification **notification)
 
 {
     notify_message(
@@ -181,7 +192,6 @@ static void battery_status_notification(
         get_battery_status_summery_string(battery, status),
         get_battery_body_string(percentage, seconds),
         NOTIFY_URGENCY_NORMAL,
-        NULL,
         NOTIFY_EXPIRES_DEFAULT);
 }
 
@@ -208,11 +218,10 @@ static void battery_level_notification(
         get_battery_level_summery_string(battery, level),
         get_battery_body_string(percentage, seconds),
         urgency,
-        NULL, 
         NOTIFY_EXPIRES_DEFAULT);
 }
 
-static gboolean battery_handler_check(Context* context)
+static gboolean battery_handler(Context* context)
 {
     guint64 capacity;
     guint64 seconds;
@@ -307,10 +316,80 @@ static gboolean battery_handler_check(Context* context)
     return G_SOURCE_CONTINUE;
 }
 
+static gint battery_compare_by_serial_number(const Battery* battery, const gchar* serial_number)
+{
+    return g_strcmp0(battery->serial_number, serial_number);
+}
+
+static guint add_watcher(Battery* battery)
+{
+    Context* context = context_init(battery);
+    guint tag = g_timeout_add_seconds_full(
+        G_PRIORITY_DEFAULT,
+        config.interval,
+        (GSourceFunc) battery_handler,
+        (gpointer) context,
+        (GDestroyNotify) context_free);
+    g_info("Add new battery handler for: %s", battery->name);
+    return tag;
+}
+
+static gboolean batteries_supply_handler(GHashTable* watchers)
+{
+    guint* ptag;
+    guint tag;
+    gchar* key;
+    gboolean result;
+    Battery *battery;
+    GHashTableIter w_iter;
+    GError* error = NULL;
+    GSList *batteries = NULL, *b_iter = NULL;
+ 
+    g_info("Get batteries supply");
+    result = get_batteries_supply(&batteries, &error);
+    if (result == FALSE)
+    {
+        g_main_loop_quit(loop);
+        LOG_WARNING_AND_RETURN("Cannot get batteries supply", error, G_SOURCE_REMOVE);
+    }
+    
+    b_iter = batteries;
+    while (b_iter != NULL)
+    {
+        battery = (Battery*) b_iter->data;
+        ptag = (guint*) g_hash_table_lookup(watchers, battery->serial_number);
+        if (ptag == NULL)
+        {
+            tag = add_watcher(battery);
+            g_hash_table_insert(watchers, (gpointer) battery->serial_number, (gpointer) &tag);
+        }
+        b_iter = g_slist_next(b_iter);
+    }
+
+    g_hash_table_iter_init(&w_iter, watchers);
+    while (g_hash_table_iter_next(&w_iter, (gpointer) &key,(gpointer) &tag))
+    {
+        b_iter = g_slist_find_custom(
+            batteries, 
+            (gconstpointer) key, 
+            (GCompareFunc) battery_compare_by_serial_number);
+
+        if (b_iter == NULL)
+        {
+            g_hash_table_iter_remove(&w_iter);
+            g_source_remove(tag);
+            g_info("Remove battery with serial-number: %s", key);
+        }
+    }
+    
+    g_slist_free_full(batteries, (GDestroyNotify) battery_free);
+    return G_SOURCE_CONTINUE;
+}
+
 static gboolean options_init(int argc, char* argv[])
 {
-    GError* error = NULL;
-    GOptionContext* option_context;
+    GError *error = NULL;
+    GOptionContext *option_context;
 
     option_context = g_option_context_new(NULL);
     g_option_context_add_main_entries(option_context, option_entries, PROGRAM_NAME);
@@ -358,10 +437,7 @@ static gboolean options_init(int argc, char* argv[])
 
 int main(int argc, char* argv[]) 
 {
-    Context* context;
-    GMainLoop* loop;
-    GSList* list = NULL;
-    GSList* iter = NULL;
+    GHashTable* watchers;
     
     setlocale (LC_ALL, "");
     g_return_val_if_fail(options_init(argc, argv), 1);
@@ -370,35 +446,17 @@ int main(int argc, char* argv[])
     g_return_val_if_fail(notify_init(PROGRAM_NAME), 1);
     g_info("Notify has been initialized");
     
+    watchers = g_hash_table_new((GHashFunc) g_str_hash, (GEqualFunc) g_int_equal);
+
     loop = g_main_loop_new(NULL, FALSE);
+    g_timeout_add_seconds(DEFAULT_INTERVAL, (GSourceFunc) batteries_supply_handler, (gpointer) watchers);
 
-    g_return_val_if_fail(get_batteries_supplies(&list, NULL), 1);
-    g_info("Power supply list has been initialized");
-
-    iter = list;
-    while (iter != NULL)
-    {
-        context = g_new(Context, 1);
-        context->battery = (Battery*) list->data;
-        context->low_level_notified = FALSE;
-        context->critical_level_notified = FALSE;
-        g_timeout_add_seconds_full(
-            G_PRIORITY_DEFAULT,
-            config.interval,
-            (GSourceFunc) battery_handler_check,
-            (gpointer) context,
-            (GDestroyNotify) g_free);
-        
-        g_info("Add watcher: %s", context->battery->name);
-
-        iter = g_slist_next(iter);
-    }
-
+    g_info("Run loop");
     g_main_loop_run(loop);
 
     g_main_loop_unref(loop);
     notify_uninit();
-    g_slist_free_full(list, (GDestroyNotify) battery_free);
+    g_hash_table_destroy(watchers);
     
     return 0;
 }

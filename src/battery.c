@@ -75,7 +75,7 @@ static gboolean _get_sysattr_int(
 gboolean battery_init(Battery* battery, gchar* name, GError** error)
 {
     gboolean result;
-    gchar* model_name, *manufacture, *technology;
+    gchar* model_name, *manufacture, *technology, *serial_number;
     gchar* sys_path = g_strjoin("", SYSFS_BASE_PATH, name, NULL);
     
     result = _get_sysattr_string_by_path(name, sys_path, BATTERY_MANUFACTUR_FILENAME, &manufacture, error);
@@ -86,13 +86,28 @@ gboolean battery_init(Battery* battery, gchar* name, GError** error)
 
     result = _get_sysattr_string_by_path(name, sys_path, BATTERY_TECHNOLOGY_FILENAME, &technology, error);
     g_return_val_if_fail(result, FALSE);
+    result = _get_sysattr_string_by_path(name, sys_path, BATTERY_SERIAL_NUMBER_FILENAME, &serial_number, error);
+    g_return_val_if_fail(result, FALSE);
 
     battery->sys_path = sys_path;
     battery->name = name;
     battery->model_name = g_strstrip(model_name);
     battery->manufacture = g_strstrip(manufacture);
     battery->technology = g_strstrip(technology);
+    battery->serial_number = g_strstrip(serial_number);
     return TRUE;
+}
+
+Battery* battery_copy(const Battery* battery)
+{
+    Battery* new_battery = g_new(Battery, 1);
+    new_battery->name = g_strdup(battery->name);
+    new_battery->sys_path = g_strdup(battery->sys_path);
+    new_battery->model_name = g_strdup(battery->model_name);
+    new_battery->manufacture = g_strdup(battery->manufacture);
+    new_battery->technology = g_strdup(battery->technology);
+    new_battery->serial_number = g_strdup(battery->serial_number);
+    return new_battery;
 }
 
 void battery_free(Battery* battery)
@@ -140,9 +155,7 @@ gboolean get_battery_capacity(const Battery* battery, guint64* capacity, GError*
 
     result = _get_sysattr_int(battery, BATTERY_CAPACITY_FILENAME, capacity, NULL);
     if (result == TRUE)
-    {
         return TRUE;
-    }
 
     result = _get_sysattr_int(battery, BATTERY_CHARGE_NOW_FILENAME, &now, &_error);
     if (result == FALSE)
@@ -227,7 +240,7 @@ gboolean get_battery_time(const Battery* battery, BATTERY_STATUS status, guint64
     return TRUE;
 }
 
-gboolean get_batteries_supplies(GSList** list, GError** error)
+gboolean get_batteries_supply(GSList** list, GError** error)
 {
     Battery* battery;
     const gchar* dir_name;
