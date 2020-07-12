@@ -25,7 +25,7 @@ GQuark       g_io_error_quark      (void);
 
 typedef enum 
 {
-    UNKNOWN_STATUS, 
+    UNKNOWN_STATUS = 1, 
     DISCHARGING_STATUS, 
     NOT_CHARGING_STATUS, 
     CHARGING_STATUS, 

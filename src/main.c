@@ -63,7 +63,8 @@ typedef struct _Context Context;
 Context* context_init(Battery* battery)
 {
     Context* context = g_new(Context, 1);
-    context->battery = battery_copy(battery);
+    context->battery = battery;
+    context->prev_status = 0;
     context->low_level_notified = FALSE;
     context->critical_level_notified = FALSE;
     return context;
@@ -356,7 +357,7 @@ static gboolean batteries_supply_handler(GHashTable* watchers)
     b_iter = batteries;
     while (b_iter != NULL)
     {
-        battery = (Battery*) b_iter->data;
+        battery = battery_copy((Battery*) b_iter->data);
         ptag = (guint*) g_hash_table_lookup(watchers, battery->serial_number);
         if (ptag == NULL)
         {
