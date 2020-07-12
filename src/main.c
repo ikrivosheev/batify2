@@ -336,14 +336,13 @@ static guint add_watcher(Battery* battery)
 
 static gboolean batteries_supply_handler(GHashTable* watchers)
 {
-    guint* ptag;
-    guint tag;
-    gchar* key;
+    guint *ptag;
+    gchar *key;
     gboolean result;
     Battery *battery;
     GHashTableIter w_iter;
     GError* error = NULL;
-    GSList *batteries = NULL, *b_iter = NULL;
+    GSList *batteries = NULL, *b_iter;
  
     g_info("Get batteries supply");
     result = get_batteries_supply(&batteries, &error);
@@ -353,6 +352,7 @@ static gboolean batteries_supply_handler(GHashTable* watchers)
         LOG_WARNING_AND_RETURN("Cannot get batteries supply", error, G_SOURCE_REMOVE);
     }
     
+    g_info("Create watchers");
     b_iter = batteries;
     while (b_iter != NULL)
     {
@@ -360,15 +360,19 @@ static gboolean batteries_supply_handler(GHashTable* watchers)
         ptag = (guint*) g_hash_table_lookup(watchers, battery->serial_number);
         if (ptag == NULL)
         {
-            tag = add_watcher(battery);
-            g_hash_table_insert(watchers, (gpointer) battery->serial_number, (gpointer) &tag);
+            ptag = g_new(guint, 1);
+            *ptag = add_watcher(battery);
+            key = g_strdup(battery->serial_number);
+            g_hash_table_insert(watchers, (gpointer) key, (gpointer) ptag);
         }
         b_iter = g_slist_next(b_iter);
     }
-
+    
+    g_info("Remove old watchers");
     g_hash_table_iter_init(&w_iter, watchers);
-    while (g_hash_table_iter_next(&w_iter, (gpointer) &key,(gpointer) &tag))
+    while (g_hash_table_iter_next(&w_iter, (gpointer) &key, (gpointer) &ptag))
     {
+        g_debug("Check battery with serial-number: %s", key);
         b_iter = g_slist_find_custom(
             batteries, 
             (gconstpointer) key, 
@@ -376,9 +380,9 @@ static gboolean batteries_supply_handler(GHashTable* watchers)
 
         if (b_iter == NULL)
         {
+            g_debug("Remove battery with serial-number: %s", key);
             g_hash_table_iter_remove(&w_iter);
-            g_source_remove(tag);
-            g_info("Remove battery with serial-number: %s", key);
+            g_source_remove(*ptag);
         }
     }
     
@@ -430,8 +434,7 @@ static gboolean options_init(int argc, char* argv[])
         g_warning("Full capacity should be greater then critical level");
         return FALSE;
     }
-    
-    
+ 
     return TRUE;
 }
 
@@ -446,7 +449,11 @@ int main(int argc, char* argv[])
     g_return_val_if_fail(notify_init(PROGRAM_NAME), 1);
     g_info("Notify has been initialized");
     
-    watchers = g_hash_table_new((GHashFunc) g_str_hash, (GEqualFunc) g_int_equal);
+    watchers = g_hash_table_new_full(
+        (GHashFunc) g_str_hash, 
+        (GEqualFunc) g_str_equal,
+        (GDestroyNotify) g_free,
+        (GDestroyNotify) g_free);
 
     loop = g_main_loop_new(NULL, FALSE);
     g_timeout_add_seconds(DEFAULT_INTERVAL, (GSourceFunc) batteries_supply_handler, (gpointer) watchers);
