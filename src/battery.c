@@ -117,6 +117,7 @@ void battery_free(Battery* battery)
     g_free(battery->model_name);
     g_free(battery->manufacture);
     g_free(battery->technology);
+    g_free(battery->serial_number);
 }
 
 gboolean get_battery_status(const Battery* battery, BATTERY_STATUS* status, GError** error)
