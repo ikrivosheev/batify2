@@ -49,7 +49,7 @@ static struct config
     DEFAULT_DEBUG,
 };
 
-static struct _Context 
+struct _Context 
 {
     Battery* battery;
     BATTERY_STATUS prev_status;
