@@ -10,6 +10,11 @@
 #define BATTERY_SERIAL_NUMBER_FILENAME "serial_number"
 #define BATTERY_STATUS_FILENAME "status"
 #define BATTERY_CAPACITY_FILENAME "capacity"
+
+#define BATTERY_ENERGY_NOW_FILENAME "energy_now"
+#define BATTERY_ENERGY_FULL_FILENAME "energy_full"
+#define BATTERY_POWER_NOW_FILENAME "power_now"
+
 #define BATTERY_CHARGE_NOW_FILENAME "charge_now"
 #define BATTERY_CHARGE_FULL_FILENAME "charge_full"
 #define BATTERY_CURRENT_NOW_FILENAME "current_now"
@@ -39,6 +44,7 @@ struct _Battery {
     gchar* manufacture;
     gchar* technology;
     gchar* serial_number;
+    gboolean use_charge;
 };
 typedef struct _Battery Battery;
 

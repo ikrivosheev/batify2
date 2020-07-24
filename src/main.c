@@ -14,11 +14,11 @@
 #define DEFAULT_FULL_CAPACITY 98
 #define DEFAULT_DEBUG FALSE
 
-#define LOG_WARNING_AND_RETURN(prefix, error, val) \
+#define LOG_WARNING_AND_RETURN(val, error, prefix, ...) \
     { \
         if (error != NULL) \
         { \
-            g_warning(prefix ": %s", error->message); \
+            g_warning(prefix ": %s", ##__VA_ARGS__, error->message); \
             g_error_free(error); \
         } \
         else \
@@ -231,9 +231,9 @@ static gboolean battery_handler(Context* context)
     GError* error = NULL;
     const Battery* battery = context->battery;
 
-    g_debug("Get battery status");
+    g_debug("Get battery(%s) status", battery->name);
     if (get_battery_status(battery, &status, &error) == FALSE)
-        LOG_WARNING_AND_RETURN("Cannot get battery status", error, G_SOURCE_CONTINUE);
+        LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) status", battery->name);
 
     switch(status)
     {
@@ -247,50 +247,52 @@ static gboolean battery_handler(Context* context)
             
             g_debug("Get battery capacity");
             if (get_battery_capacity(battery, &capacity, &error) == FALSE)
-                LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
+                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) capacty", battery->name);
 
             if (capacity >= config.full_capacity)
             {
-                g_debug("Capacity is greater then full capacity: %d", config.full_capacity);
+                g_debug(
+                    "Battery(%s) capacity is greater then full capacity: %d", 
+                    battery->name, config.full_capacity);
                 battery_status_notification(battery, CHARGED_STATUS, capacity, 0, &notification);
             }
             break;
         case CHARGED_STATUS:
-            g_debug("Got CHARGED_STATUS");
+            g_debug("Battery(%s) got CHARGED_STATUS", battery->name);
             context->low_level_notified = FALSE;
             context->critical_level_notified = FALSE;
             if (context->prev_status != status)
                 battery_status_notification(battery, status, 100, 0, &notification);
             break;
         case CHARGING_STATUS:
-            g_debug("Got CHARGING_STATUS");
+            g_debug("Battery(%s) got CHARGING_STATUS", battery->name);
             context->low_level_notified = FALSE;
             context->critical_level_notified = FALSE;
             if (context->prev_status == status)
                 break;
             
-            g_debug("Get battery capacity");
+            g_debug("Get battery(%s) capacity", battery->name);
             if (get_battery_capacity(battery, &capacity, &error) == FALSE)
-                LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
+                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) capacty", battery->name);
 
-            g_debug("Get battery time");
+            g_debug("Get battery(%s) time", battery->name);
             if (get_battery_time(battery, status, &seconds, &error) == FALSE)
-                LOG_WARNING_AND_RETURN("Cannot get battery time", error, G_SOURCE_CONTINUE);
+                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) time", battery->name);
 
             battery_status_notification(battery, status, capacity, seconds, &notification);
             break;
         case DISCHARGING_STATUS:
-            g_debug("Got DISCHARGING_STATUS");
+            g_debug("Battery(%s) got DISCHARGING_STATUS", battery->name);
         case NOT_CHARGING_STATUS:
-            g_debug("Got NOT_CHARGING_STATUS");
+            g_debug("Battery(%s) got NOT_CHARGING_STATUS", battery->name);
 
-            g_debug("Get battery capacity");
+            g_debug("Get battery(%s) capacity", battery->name);
             if (get_battery_capacity(battery, &capacity, &error) == FALSE)
-                LOG_WARNING_AND_RETURN("Cannot get capacty", error, G_SOURCE_CONTINUE);
+                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) capacty", battery->name);
 
             g_debug("Get battery time");
             if (get_battery_time(battery, status, &seconds, &error) == FALSE)
-                LOG_WARNING_AND_RETURN("Cannot get battery time", error, G_SOURCE_CONTINUE);
+                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) time", battery->name);
 
             if (context->prev_status != status)
             {
@@ -350,7 +352,7 @@ static gboolean batteries_supply_handler(GHashTable* watchers)
     if (result == FALSE)
     {
         g_main_loop_quit(loop);
-        LOG_WARNING_AND_RETURN("Cannot get batteries supply", error, G_SOURCE_REMOVE);
+        LOG_WARNING_AND_RETURN(G_SOURCE_REMOVE, error, "Cannot get batteries supply");
     }
     
     g_info("Create watchers");
@@ -400,7 +402,7 @@ static gboolean options_init(int argc, char* argv[])
     g_option_context_add_main_entries(option_context, option_entries, PROGRAM_NAME);
 
     if (g_option_context_parse(option_context, &argc, &argv, &error) == FALSE) 
-        LOG_WARNING_AND_RETURN("Cannot parse command line arguments", error, FALSE);
+        LOG_WARNING_AND_RETURN(FALSE, error, "Cannot parse command line arguments");
 
     g_option_context_free(option_context);
 
