@@ -277,22 +277,27 @@ static gboolean battery_handler(Context* context)
 
             g_debug("Get battery(%s) time", battery->name);
             if (get_battery_time(battery, status, &seconds, &error) == FALSE)
-                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) time", battery->name);
-
+            {
+                g_warning("Cannot get battery(%s) time", battery->name);
+                seconds = 0;
+            }
             battery_status_notification(battery, status, capacity, seconds, &notification);
+
             break;
         case DISCHARGING_STATUS:
-            g_debug("Battery(%s) got DISCHARGING_STATUS", battery->name);
         case NOT_CHARGING_STATUS:
-            g_debug("Battery(%s) got NOT_CHARGING_STATUS", battery->name);
+            g_debug("Battery(%s) got NOT_CHARGING_STATUS or DISCHARGING_STATUS", battery->name);
 
             g_debug("Get battery(%s) capacity", battery->name);
             if (get_battery_capacity(battery, &capacity, &error) == FALSE)
-                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) capacty", battery->name);
+                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) capacity", battery->name);
 
             g_debug("Get battery time");
             if (get_battery_time(battery, status, &seconds, &error) == FALSE)
-                LOG_WARNING_AND_RETURN(G_SOURCE_CONTINUE, error, "Cannot get battery(%s) time", battery->name);
+            {
+                g_warning("Cannot get battery(%s) time", battery->name);
+                seconds = 0;
+            }
 
             if (context->prev_status != status)
             {
