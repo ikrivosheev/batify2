@@ -55,6 +55,7 @@ struct _Context
     BATTERY_STATUS prev_status;
     gboolean low_level_notified;
     gboolean critical_level_notified;
+    NotifyNotification *notification;
 };
 
 typedef struct _Context Context;
@@ -67,6 +68,7 @@ Context* context_init(Battery* battery)
     context->prev_status = 0;
     context->low_level_notified = FALSE;
     context->critical_level_notified = FALSE;
+    context->notification = notify_notification_new(NULL, NULL, NULL);
     return context;
 }
 
@@ -88,16 +90,16 @@ static GOptionEntry option_entries[] =
 };
 
 static void notify_message(
-    NotifyNotification** notification, 
+    NotifyNotification* notification, 
     const gchar* summary, 
     const gchar* body,
     NotifyUrgency urgency,
     gint timeout)
 {
-    *notification = notify_notification_new(summary, body, NULL);
-    notify_notification_set_timeout(*notification, timeout);
-    notify_notification_set_urgency(*notification, urgency);
-    notify_notification_show(*notification, NULL);
+    notify_notification_update(notification, summary, body, NULL);
+    notify_notification_set_timeout(notification, timeout);
+    notify_notification_set_urgency(notification, urgency);
+    notify_notification_show(notification, NULL);
 }
 
 
@@ -185,7 +187,7 @@ static void battery_status_notification(
     const BATTERY_STATUS status,
     const guint64 percentage,
     const guint64 seconds,
-    NotifyNotification **notification)
+    NotifyNotification *notification)
 
 {
     notify_message(
@@ -201,7 +203,7 @@ static void battery_level_notification(
     const BATTERY_LEVEL level,
     const guint64 percentage,
     const guint64 seconds,
-    NotifyNotification** notification)
+    NotifyNotification* notification)
 {
     NotifyUrgency urgency;
     switch(level)
@@ -227,7 +229,6 @@ static gboolean battery_handler(Context* context)
     guint64 capacity;
     guint64 seconds;
     BATTERY_STATUS status;
-    NotifyNotification* notification;
     GError* error = NULL;
     const Battery* battery = context->battery;
 
@@ -254,7 +255,7 @@ static gboolean battery_handler(Context* context)
                 g_debug(
                     "Battery(%s) capacity is greater then full capacity: %d", 
                     battery->name, config.full_capacity);
-                battery_status_notification(battery, CHARGED_STATUS, capacity, 0, &notification);
+                battery_status_notification(battery, CHARGED_STATUS, capacity, 0, context->notification);
             }
             break;
         case CHARGED_STATUS:
@@ -262,7 +263,7 @@ static gboolean battery_handler(Context* context)
             context->low_level_notified = FALSE;
             context->critical_level_notified = FALSE;
             if (context->prev_status != status)
-                battery_status_notification(battery, status, 100, 0, &notification);
+                battery_status_notification(battery, status, 100, 0, context->notification);
             break;
         case CHARGING_STATUS:
             g_debug("Battery(%s) got CHARGING_STATUS", battery->name);
@@ -281,7 +282,7 @@ static gboolean battery_handler(Context* context)
                 g_warning("Cannot get battery(%s) time", battery->name);
                 seconds = 0;
             }
-            battery_status_notification(battery, status, capacity, seconds, &notification);
+            battery_status_notification(battery, status, capacity, seconds, context->notification);
 
             break;
         case DISCHARGING_STATUS:
@@ -301,14 +302,14 @@ static gboolean battery_handler(Context* context)
 
             if (context->prev_status != status)
             {
-                battery_status_notification(battery, status, capacity, seconds, &notification);
+                battery_status_notification(battery, status, capacity, seconds, context->notification);
             }
             if ((context->critical_level_notified == FALSE) 
                 && (capacity <= config.critical_level))
             {
                 context->low_level_notified = FALSE;
                 context->critical_level_notified = TRUE;
-                battery_level_notification(battery, CRITICAL_LEVEL, capacity, seconds, &notification);
+                battery_level_notification(battery, CRITICAL_LEVEL, capacity, seconds, context->notification);
             }
             if  ((context->low_level_notified == FALSE) 
                  && (capacity > config.critical_level) 
@@ -316,7 +317,7 @@ static gboolean battery_handler(Context* context)
             {
                 context->low_level_notified = TRUE;
                 context->critical_level_notified = FALSE;
-                battery_level_notification(battery, LOW_LEVEL, capacity, seconds, &notification);
+                battery_level_notification(battery, LOW_LEVEL, capacity, seconds, context->notification);
             }
             break;
     }
