@@ -38,10 +38,11 @@ static struct config
     gint low_level;
     gint critical_level;
     gint full_capacity;
+    gint timeout;
     gboolean debug;
 } config = {
-    DEFAULT_INTERVAL,      DEFAULT_LOW_LEVEL, DEFAULT_CRITICAL_LEVEL,
-    DEFAULT_FULL_CAPACITY, DEFAULT_DEBUG,
+    DEFAULT_INTERVAL,      DEFAULT_LOW_LEVEL,      DEFAULT_CRITICAL_LEVEL,
+    DEFAULT_FULL_CAPACITY, NOTIFY_EXPIRES_DEFAULT, DEFAULT_DEBUG,
 };
 
 struct _Context
@@ -92,6 +93,14 @@ static GOptionEntry option_entries[] = {
       "Critical battery level in percent",
       NULL },
     { "full-capacity", 'f', 0, G_OPTION_ARG_INT, &config, "Full capacity for battery", NULL },
+    { "timeout",
+      't',
+      0,
+      G_OPTION_ARG_INT,
+      &config.timeout,
+      "Notification timeout in seconds (-1 - default notification timeout, 0 - notification never "
+      "expires)",
+      NULL },
     { NULL }
 };
 
@@ -194,7 +203,7 @@ battery_status_notification(const Battery* battery,
                    get_battery_body_string(seconds),
                    NOTIFY_URGENCY_NORMAL,
                    percent,
-                   NOTIFY_EXPIRES_DEFAULT);
+                   config.timeout);
 }
 
 static void
@@ -433,6 +442,10 @@ options_init(int argc, char* argv[])
     if (config.full_capacity < config.critical_level) {
         g_warning("Full capacity should be greater then critical level");
         return FALSE;
+    }
+
+    if (config.timeout > 0) {
+        config.timeout *= 1000;
     }
 
     return TRUE;
