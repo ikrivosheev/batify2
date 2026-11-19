@@ -71,6 +71,7 @@ context_init(Battery* battery)
 void
 context_free(Context* context)
 {
+    g_object_unref(context->notification);
     battery_free(context->battery);
     g_free(context);
 }
@@ -92,7 +93,13 @@ static GOptionEntry option_entries[] = {
       &config.critical_level,
       "Critical battery level in percent",
       NULL },
-    { "full-capacity", 'f', 0, G_OPTION_ARG_INT, &config, "Full capacity for battery", NULL },
+    { "full-capacity",
+      'f',
+      0,
+      G_OPTION_ARG_INT,
+      &config.full_capacity,
+      "Full capacity for battery",
+      NULL },
     { "timeout",
       't',
       0,
@@ -373,11 +380,12 @@ batteries_supply_handler(GHashTable* watchers)
     g_info("Create watchers");
     b_iter = batteries;
     while (b_iter != NULL) {
-        battery = battery_copy((Battery*)b_iter->data);
+        battery = (Battery*)b_iter->data;
         ptag = (guint*)g_hash_table_lookup(watchers, battery->serial_number);
         if (ptag == NULL) {
+            Battery* copy = battery_copy(battery);
             ptag = g_new(guint, 1);
-            *ptag = add_watcher(battery);
+            *ptag = add_watcher(copy);
             key = g_strdup(battery->serial_number);
             g_hash_table_insert(watchers, (gpointer)key, (gpointer)ptag);
         }
@@ -393,8 +401,8 @@ batteries_supply_handler(GHashTable* watchers)
 
         if (b_iter == NULL) {
             g_debug("Remove battery with serial-number: %s", key);
-            g_hash_table_iter_remove(&w_iter);
             g_source_remove(*ptag);
+            g_hash_table_iter_remove(&w_iter);
         }
     }
 
@@ -405,16 +413,17 @@ batteries_supply_handler(GHashTable* watchers)
 static gboolean
 options_init(int argc, char* argv[])
 {
+    gboolean result;
     GError* error = NULL;
     GOptionContext* option_context;
 
     option_context = g_option_context_new(NULL);
     g_option_context_add_main_entries(option_context, option_entries, PROGRAM_NAME);
 
-    if (g_option_context_parse(option_context, &argc, &argv, &error) == FALSE)
-        LOG_WARNING_AND_RETURN(FALSE, error, "Cannot parse command line arguments");
-
+    result = g_option_context_parse(option_context, &argc, &argv, &error);
     g_option_context_free(option_context);
+    if (result == FALSE)
+        LOG_WARNING_AND_RETURN(FALSE, error, "Cannot parse command line arguments");
 
     if (config.debug == TRUE)
         g_log_set_handler(
