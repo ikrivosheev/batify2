@@ -1,14 +1,15 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 
-project(batify VERSION 0.0.1)
+project(batify VERSION 0.0.1 LANGUAGES C)
 
 add_subdirectory(src)
 
+include(GNUInstallDirs)
 install(
     TARGETS ${PROJECT_NAME}
-    DESTINATION bin
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-install(    
+install(
     FILES "man/batify.1"
-    DESTINATION share/man/man1
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
 )

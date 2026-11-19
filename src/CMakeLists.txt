@@ -10,17 +10,20 @@ set_target_properties(batify battery PROPERTIES
 find_package(PkgConfig REQUIRED)
 pkg_search_module(GLIB REQUIRED glib-2.0)
 pkg_search_module(LIBNOTIFY REQUIRED libnotify)
-pkg_search_module(GDKPIXBUF REQUIRED gdk-pixbuf-2.0)
 
-target_link_libraries(batify 
-    battery 
-    ${GLIB_LDFLAGS}
+target_compile_definitions(batify PRIVATE G_LOG_DOMAIN="batify")
+target_compile_options(batify PRIVATE -Wall -Wextra)
+target_compile_options(battery PRIVATE -Wall -Wextra)
+
+target_link_libraries(batify
+    battery
+    ${GLIB_LIBRARIES}
     ${LIBNOTIFY_LIBRARIES}
 )
 
 target_include_directories(
     batify
-    PUBLIC 
+    PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${GLIB_INCLUDE_DIRS}
     ${LIBNOTIFY_INCLUDE_DIRS}
@@ -28,7 +31,7 @@ target_include_directories(
 
 target_include_directories(
     battery
-    PUBLIC 
+    PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${GLIB_INCLUDE_DIRS}
 )

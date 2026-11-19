@@ -20,7 +20,7 @@
             g_warning(prefix ": %s", ##__VA_ARGS__, error->message);                               \
             g_error_free(error);                                                                   \
         } else                                                                                     \
-            g_warning(prefix);                                                                     \
+            g_warning(prefix, ##__VA_ARGS__);                                                      \
         return val;                                                                                \
     }
 
@@ -266,7 +266,7 @@ battery_handler(Context* context)
                 LOG_WARNING_AND_RETURN(
                   G_SOURCE_CONTINUE, error, "Cannot get battery(%s) capacty", battery->name);
 
-            if (capacity >= config.full_capacity) {
+            if (capacity >= (guint64)config.full_capacity) {
                 g_debug("Battery(%s) capacity is greater then full capacity: %d",
                         battery->name,
                         config.full_capacity);
@@ -321,14 +321,15 @@ battery_handler(Context* context)
                   battery, status, capacity, seconds, context->notification);
             }
             if ((context->critical_level_notified == FALSE) &&
-                (capacity <= config.critical_level)) {
+                (capacity <= (guint64)config.critical_level)) {
                 context->low_level_notified = FALSE;
                 context->critical_level_notified = TRUE;
                 battery_level_notification(
                   battery, CRITICAL_LEVEL, capacity, seconds, context->notification);
             }
-            if ((context->low_level_notified == FALSE) && (capacity > config.critical_level) &&
-                (capacity <= config.low_level)) {
+            if ((context->low_level_notified == FALSE) &&
+                (capacity > (guint64)config.critical_level) &&
+                (capacity <= (guint64)config.low_level)) {
                 context->low_level_notified = TRUE;
                 context->critical_level_notified = FALSE;
                 battery_level_notification(
@@ -425,10 +426,11 @@ options_init(int argc, char* argv[])
     if (result == FALSE)
         LOG_WARNING_AND_RETURN(FALSE, error, "Cannot parse command line arguments");
 
-    if (config.debug == TRUE)
+    if (config.debug == TRUE) {
+        g_setenv("G_MESSAGES_DEBUG", "all", FALSE);
         g_log_set_handler(
           G_LOG_DOMAIN, G_LOG_LEVEL_MASK | G_LOG_LEVEL_DEBUG, g_log_default_handler, NULL);
-    else
+    } else
         g_log_set_handler(G_LOG_DOMAIN, G_LOG_LEVEL_MASK, g_log_default_handler, NULL);
 
     if (config.low_level < 0 || config.low_level > 100) {
